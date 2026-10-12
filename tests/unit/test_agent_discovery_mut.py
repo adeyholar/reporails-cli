@@ -264,13 +264,56 @@ def test_rule_only_agent_loses_a_rule_file_inside_the_excluded_folder() -> None:
 
 @pytest.mark.unit
 @pytest.mark.subsys_lint
-def test_agent_whose_every_instruction_file_is_excluded_is_dropped() -> None:
+def test_agent_whose_only_instruction_file_is_excluded_keeps_its_surviving_rule_files() -> None:
     from reporails_cli.core.discovery.agents import filter_agents_by_exclude_dirs, filter_agents_by_exclude_files
 
     root = Path("/proj")
-    agent = _agent([root / "vendor" / "CLAUDE.md"], [root / ".claude" / "rules" / "python.md"])
+    rule = root / ".claude" / "rules" / "python.md"
+    agent = _agent([root / "vendor" / "CLAUDE.md"], [rule])
+    by_dirs = filter_agents_by_exclude_dirs([agent], root, frozenset({"vendor"}))
+    by_files = filter_agents_by_exclude_files([agent], root, ["vendor/**"])
+    assert [(a.instruction_files, a.rule_files) for a in by_dirs] == [([], [rule])]
+    assert [(a.instruction_files, a.rule_files) for a in by_files] == [([], [rule])]
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_lint
+def test_agent_whose_only_instruction_file_is_excluded_and_has_no_rule_files_is_dropped() -> None:
+    from reporails_cli.core.discovery.agents import filter_agents_by_exclude_dirs, filter_agents_by_exclude_files
+
+    root = Path("/proj")
+    agent = _agent([root / "vendor" / "CLAUDE.md"], [])
     assert filter_agents_by_exclude_dirs([agent], root, frozenset({"vendor"})) == []
     assert filter_agents_by_exclude_files([agent], root, ["vendor/**"]) == []
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_lint
+def test_rule_only_agent_whose_every_rule_file_is_excluded_is_dropped() -> None:
+    from reporails_cli.core.discovery.agents import filter_agents_by_exclude_dirs, filter_agents_by_exclude_files
+
+    root = Path("/proj")
+    agent = _agent([], [root / "vendor" / ".claude" / "rules" / "x.md"])
+    assert filter_agents_by_exclude_dirs([agent], root, frozenset({"vendor"})) == []
+    assert filter_agents_by_exclude_files([agent], root, ["vendor/**"]) == []
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_lint
+def test_excluding_the_main_instruction_file_keeps_the_rule_files_through_the_pipeline(tmp_path: Path) -> None:
+    from reporails_cli.core.discovery.agents import detect_agents, get_all_instruction_files
+    from reporails_cli.core.pipeline.mapping import resolve_agent_filters
+
+    main = tmp_path / "CLAUDE.md"
+    main.write_text("# Project\n\nRun the tests before you commit.\n", encoding="utf-8")
+    rule = tmp_path / ".claude" / "rules" / "python.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("# Python\n\nUse type hints on every function.\n", encoding="utf-8")
+
+    _, _, _, filtered = resolve_agent_filters("claude", detect_agents(tmp_path), tmp_path, None, ["CLAUDE.md"])
+    files = get_all_instruction_files(tmp_path, filtered)
+    assert rule in files
+    assert main not in files
 
 
 @pytest.mark.unit

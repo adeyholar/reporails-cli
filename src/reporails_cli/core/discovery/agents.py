@@ -483,13 +483,13 @@ def filter_agents_by_id(agents: list[DetectedAgent], agent_id: str) -> list[Dete
 
 def _drop_agent_files(agents: list[DetectedAgent], drop: Any) -> list[DetectedAgent]:
     """Each agent with the instruction and rule files `drop(path)` rejects removed. An
-    agent is dropped only when it had instruction files and every one was rejected; an
-    agent with no instruction files to begin with (rule files only) is kept."""
+    agent is kept while at least one instruction or rule file survives, and dropped when
+    none does."""
     filtered: list[DetectedAgent] = []
     for agent in agents:
         inst = [f for f in agent.instruction_files if not drop(f)]
-        if inst or not agent.instruction_files:
-            rules = [f for f in agent.rule_files if not drop(f)]
+        rules = [f for f in agent.rule_files if not drop(f)]
+        if inst or rules:
             filtered.append(
                 DetectedAgent(agent.agent_type, inst, agent.config_files, rules, agent.detected_directories)
             )
@@ -501,7 +501,7 @@ def filter_agents_by_exclude_dirs(
     target: Path,
     exclude_dirs: frozenset[str],
 ) -> list[DetectedAgent]:
-    """Remove files in excluded directories. Drops an agent whose instruction files were all removed."""
+    """Remove files in excluded directories. Drops an agent left with no instruction or rule files."""
     if not exclude_dirs:
         return agents
     return _drop_agent_files(agents, lambda f: is_excluded(f, target, exclude_dirs))

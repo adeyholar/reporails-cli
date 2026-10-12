@@ -15,7 +15,7 @@
 
 ### Fixed
 
-- Check: a project whose only agent files are rule files (such as `.claude/rules/*.md` with no `CLAUDE.md`) is still checked and scored when you leave folders or files out of the run, even when nothing matches them.
+- Check: a project whose only agent files are rule files (such as `.claude/rules/*.md` with no `CLAUDE.md`) is still checked and scored when you leave folders or files out of the run, even when nothing matches them, and leaving out a project's main instruction file no longer leaves out its rule files.
 - Check: a project with a line that holds a very long run of code or formatting spans, such as a generated docs index, is scored again. Such a line no longer leaves the whole project with no score and an "unrecognized" error.
 - Check: a rule check that does not finish in time on a very large file no longer reports a finding it never confirmed, or misses one it never looked for. It reports nothing for that file and is listed as not evaluated.
 - Check: when the diagnostics server you set with `AILS_SERVER_URL` is busy or takes too long, `ails check` says so and tells you when to try again, instead of reporting a plain HTTP error. A project too large to score gets its own message there too.
