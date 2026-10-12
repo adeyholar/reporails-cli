@@ -166,7 +166,8 @@ def _notice_lines(payload: dict[str, Any]) -> list[str]:
     lines = ["notices:"]
     for n in notices:
         url = f" ({n['url']})" if n.get("url") else ""
-        lines.append(f"  - {n.get('level', 'info')}: {n.get('text', '')}{url}")
+        label = "promo" if n.get("kind") == "promo" else n.get("level", "info")
+        lines.append(f"  - {label}: {n.get('text', '')}{url}")
     return lines
 
 

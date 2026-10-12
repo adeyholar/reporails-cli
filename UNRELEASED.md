@@ -2,7 +2,7 @@
 
 ### Added
 
-- Check: announcements from reporails can show as a short highlighted block under the header, once a day. `ails check --no-promo` or `AILS_NO_PROMO=1` hides them, and messages about your account still show. In `ails check -f json` and the MCP `validate` reply each notice carries `kind` (`notice` or `promo`), and `--format github` leaves announcements out of its annotations.
+- Check: announcements from reporails can show as a short highlighted block under the header, once a day. `ails check --no-promo` or `AILS_NO_PROMO=1` hides them, and messages about your account still show. In `ails check -f json` and the MCP `validate` reply each notice carries `kind` (`notice` or `promo`), `--format github` leaves announcements out of its annotations, and the MCP text view marks them `promo`.
 - Check: `ails check -f json` and the MCP `validate` reply carry `not_evaluated`, the `{rule, file}` pairs of checks that did not finish on a file (`[]` when every check finished). Text output names them in one line per file under the results.
 
 ### Changed

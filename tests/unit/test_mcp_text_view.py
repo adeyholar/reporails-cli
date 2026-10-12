@@ -81,6 +81,25 @@ def test_paid_view_renders_every_section_in_order() -> None:
 
 @pytest.mark.unit
 @pytest.mark.subsys_server
+def test_a_promo_notice_is_labelled_promo_and_the_rest_keep_their_level() -> None:
+    notices = [
+        {"id": "ad", "level": "info", "text": "Fixture promo", "url": "https://ad.example", "kind": "promo"},
+        {"id": "pay", "level": "warn", "text": "Payment failed", "url": "", "kind": "notice"},
+        {"id": "ends", "level": "info", "text": "Pro ends soon", "url": "", "kind": "notice"},
+        {"id": "old", "level": "warn", "text": "No kind here"},
+    ]
+    lines = render_text_view({"notices": notices}).split("\n")
+    assert lines == [
+        "notices:",
+        "  - promo: Fixture promo (https://ad.example)",
+        "  - warn: Payment failed",
+        "  - info: Pro ends soon",
+        "  - warn: No kind here",
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_server
 def test_absent_sections_are_left_out() -> None:
     assert render_text_view({"workflow": {"locations": []}}) == ""
     text = render_text_view({"tier": "pro", "workflow": {"summary": "s"}})
