@@ -338,3 +338,20 @@ def test_location_detail_does_not_count_toward_the_table_budget() -> None:
     lines = render_text_view({"workflow": {"locations": detailed}}).split("\n")
     assert [line for line in lines if not line.startswith("      ")] == locations_block(plain)
     assert len(lines) > 150
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_server
+def test_not_evaluated_is_named_per_file() -> None:
+    payload = {
+        "workflow": {},
+        "not_evaluated": [
+            {"rule": "CORE:C:0037", "file": "docs/big.md"},
+            {"rule": "CORE:C:0038", "file": "docs/big.md"},
+            {"rule": "CORE:C:0037", "file": "a.md"},
+        ],
+    }
+    lines = render_text_view(payload).splitlines()
+    assert "Not evaluated in docs/big.md: CORE:C:0037, CORE:C:0038 — these checks did not finish in time" in lines
+    assert "Not evaluated in a.md: CORE:C:0037 — the check did not finish in time" in lines
+    assert "Not evaluated" not in render_text_view({"workflow": {}, "not_evaluated": []})

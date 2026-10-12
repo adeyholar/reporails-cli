@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from reporails_cli.core.discovery.walk import ListedEntry, list_dir
+from reporails_cli.core.platform.policy.exclusion import excluded_by_name
 from reporails_cli.core.platform.utils.utils import config_pattern_matches
 
 PLUGIN_SCOPE = "plugin"
@@ -59,7 +60,7 @@ def _holds_marker(directory: Path, marker: str) -> bool:
 
 
 def _is_searchable_dir(entry: ListedEntry, exclude_dirs: frozenset[str]) -> bool:
-    if entry.name.startswith(".") or entry.name in exclude_dirs:
+    if entry.name.startswith(".") or excluded_by_name((entry.name,), exclude_dirs):
         return False
     return entry.is_dir and not entry.is_symlink
 

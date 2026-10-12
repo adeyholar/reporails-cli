@@ -25,6 +25,7 @@ from typing import Any
 import typer
 
 from reporails_cli.core.discovery.walk import safe_resolve
+from reporails_cli.core.lint.regex.not_evaluated import not_evaluated_scope
 from reporails_cli.core.mapper.skills import skill_membership
 from reporails_cli.core.pipeline.mapping import discover_scope
 from reporails_cli.interfaces.cli.check_notices import (
@@ -128,6 +129,7 @@ class CheckPipeline:
     content_findings: list[Any] = field(default_factory=list)
     client_findings: list[Any] = field(default_factory=list)
     rule_agents: tuple[str, ...] = ()
+    not_evaluated: tuple[tuple[str, str], ...] = ()
     lint_result: Any = None
     funnel_error: Any = None
     notices: tuple[Any, ...] = ()
@@ -384,9 +386,11 @@ def _flow_pipeline(state: CheckState) -> None:
         pairs = _agent_file_pairs(state)
         state.pipeline.rule_agents = tuple(dict.fromkeys(agent_id for agent_id, _ in pairs))
         skills = skill_membership(state.pipeline.ruleset_map)
-        state.pipeline.m_findings = run_m_probes_over_pairs(
-            state.targets.target, pairs, scoped=state.scope.is_targeted, skills=skills
-        )
+        with not_evaluated_scope() as unfinished:
+            state.pipeline.m_findings = run_m_probes_over_pairs(
+                state.targets.target, pairs, scoped=state.scope.is_targeted, skills=skills
+            )
+        state.pipeline.not_evaluated = tuple(unfinished)
         state.pipeline.stage_timer.mark("m_probe")
 
         if state.pipeline.ruleset_map is not None:
@@ -455,6 +459,7 @@ def _assemble_inputs(state: CheckState, lint_result: Any = None) -> Any:
         alias_fn=rule_aliases,
         rule_agents=state.pipeline.rule_agents,
         notices=state.pipeline.notices,
+        not_evaluated=state.pipeline.not_evaluated,
     )
 
 

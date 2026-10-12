@@ -2,9 +2,19 @@
 
 ### Added
 
+- Check: `ails check -f json` and the MCP `validate` reply carry `not_evaluated`, the `{rule, file}` pairs of checks that did not finish on a file (`[]` when every check finished). Text output names them in one line per file under the results.
+
 ### Changed
 
+- Check: a project over the 10,000-atom cap now gets a route to a score. The message names the densest folders with their atom counts and gives one ready `ails check --exclude-dirs …` command that leaves out enough of them for the rest of the project to be checked and scored, keeping as much checked as it can. It says excluded folders are not checked and that `exclude_dirs:` in `.ails/config.yml` keeps them out on every run. Pro keeps the contact link after the route.
+- Check: the message for a project too large to score in one request points to leaving folders out with `--exclude-dirs` or `exclude_dirs:` in `.ails/config.yml`, instead of checking a sub-folder on its own, which reads the files differently.
+- Rules: CORE:C:0037 (Static Before Dynamic) and CORE:G:0007 (Project Config Self-Contained) finish on large files in a fraction of the time. CORE:C:0037 counts a heading only when a space or tab follows its `#` marks, so a file of bare `#` lines is no longer read as having sections. CORE:G:0007 reads "requires … install" as an external dependency when both words are on one line within 120 characters. Neither rule counts toward a file's score; their findings can change.
+
 ### Fixed
+
+- Check: a project with a line that holds a very long run of code or formatting spans, such as a generated docs index, is scored again. Such a line no longer leaves the whole project with no score and an "unrecognized" error.
+- Check: a rule check that does not finish in time on a very large file no longer reports a finding it never confirmed, or misses one it never looked for. It reports nothing for that file and is listed as not evaluated.
+- Check: when the diagnostics server you set with `AILS_SERVER_URL` is busy or takes too long, `ails check` says so and tells you when to try again, instead of reporting a plain HTTP error. A project too large to score gets its own message there too.
 
 ### Removed
 

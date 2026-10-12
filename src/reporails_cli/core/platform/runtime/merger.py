@@ -138,6 +138,9 @@ class CombinedResult:
     # The hooks found in the project's agent hook configs, set by the assemble spine from the
     # features it already computes for the level; empty for a hand-built result.
     hooks: tuple[HookEntry, ...] = ()
+    # The `(rule id, project-relative file)` pairs whose check did not finish in time, so says
+    # nothing about that file; empty when every check finished.
+    not_evaluated: tuple[tuple[str, str], ...] = ()
 
 
 def _collect_server_diagnostics(

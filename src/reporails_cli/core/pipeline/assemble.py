@@ -59,6 +59,8 @@ class AssembleInputs:
     alias_fn: Callable[[str], set[str]]
     rule_agents: tuple[str, ...] = ()
     notices: tuple[Notice, ...] = ()
+    # `(rule id, file)` pairs whose check did not finish in time; the file is as the check reported it.
+    not_evaluated: tuple[tuple[str, str], ...] = ()
 
 
 def assemble_result(inp: AssembleInputs) -> Any:
@@ -107,7 +109,7 @@ def assemble_result(inp: AssembleInputs) -> Any:
     )
     result = replace(result, hooks=features.hooks)
     result = _drop_dependent(result, inp)
-    result = replace(result, notices=inp.notices)
+    result = replace(result, notices=inp.notices, not_evaluated=_relative_pairs(inp.not_evaluated, inp.scan_root))
     # The workflow goes on first, so the suppressions the author wrote apply to what it lists too.
     if lint_result is not None and lint_result.workflow is not None:
         result = replace(result, workflow=lint_result.workflow)
@@ -121,6 +123,13 @@ def assemble_result(inp: AssembleInputs) -> Any:
     result = stamp_local_tiers(result, report.local_tiers if report is not None else (), inp.scan_root)
     result = stamp_conventions(result, frozenset().union(*(convention_check_ids(a) for a in _rule_agents(inp))))
     return replace(result, stats=replace(result.stats, agents=_rule_agents(inp)))
+
+
+def _relative_pairs(pairs: tuple[tuple[str, str], ...], scan_root: Path) -> tuple[tuple[str, str], ...]:
+    """`pairs` with each file given project-relative, as findings are; repeats dropped, order kept."""
+    from reporails_cli.core.platform.runtime.merger import normalize_finding_path
+
+    return tuple(dict.fromkeys((rule, normalize_finding_path(file, scan_root)) for rule, file in pairs))
 
 
 # How long a quoted instruction may run in a finding that names where it is written.

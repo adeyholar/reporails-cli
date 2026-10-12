@@ -511,6 +511,7 @@ def format_combined_result(
         "server_error": format_server_error(getattr(result, "server_error", None)),
         "tier": result.tier,
         "notices": format_notices(result.notices),
+        "not_evaluated": [{"rule": rule, "file": file} for rule, file in result.not_evaluated],
         "quality": (
             float(result.quality.display_score)
             if result.quality is not None and result.quality.display_score is not None

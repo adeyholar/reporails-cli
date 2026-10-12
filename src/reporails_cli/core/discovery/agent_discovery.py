@@ -21,6 +21,7 @@ from reporails_cli.core.discovery.walk import (
     walk_glob_matches,
     walk_markdown,
 )
+from reporails_cli.core.platform.policy.exclusion import excluded_by_name
 from reporails_cli.core.platform.utils.utils import config_pattern_matches
 from reporails_cli.core.platform.utils.utils import matches_any_glob as _matches_any_glob
 
@@ -87,7 +88,7 @@ def is_excluded(path: Path, target: Path, exclude_dirs: frozenset[str]) -> bool:
         rel = path.relative_to(target)
     except ValueError:
         return False
-    return bool(exclude_dirs & set(rel.parts))
+    return excluded_by_name(rel.parts, exclude_dirs)
 
 
 # Coding-agent home directories whose name differs from the agent's own id

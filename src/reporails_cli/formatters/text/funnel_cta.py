@@ -7,6 +7,7 @@ the shipped tarball.
 
 from __future__ import annotations
 
+import shlex
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -176,7 +177,33 @@ def format_cta(err: FunnelError) -> str:
     template = _CTA_TEMPLATES.get((err.error, tier)) or _CTA_TEMPLATES.get((err.error, "*"))
     if template is None:
         return _with_url(f"{err.error.replace('_', ' ').capitalize()}.", url)
-    return _with_url(template.format(err=err), url)
+    text = template.format(err=err)
+    if err.error == "atom_cap_exceeded":
+        if err.status is None:
+            text += _atom_cap_route(err, tier)
+        elif tier == "pro":
+            text += " \u2014 let us know your use case"
+    return _with_url(text, url)
+
+
+def _atom_cap_route(err: FunnelError, tier: str) -> str:
+    """The lines after the first sentence of an over-cap refusal: densest folders, the command, the caveats."""
+    from rich.markup import escape as escape_markup
+
+    lines = []
+    if err.dense_dirs:
+        dense = ", ".join(f"{escape_markup(name)} ({n:,})" for name, n in err.dense_dirs)
+        lines.append(f"Densest folders, in atoms: {dense}.")
+    if err.exclude_route:
+        flags = " ".join(f"--exclude-dirs {shlex.quote(name)}" for name in err.exclude_route)
+        lines.append(f"Leave these out to get under the cap: `ails check {escape_markup(flags)}`")
+        lines.append("Excluded folders are not checked.")
+        lines.append("Add them to `exclude_dirs:` in `.ails/config.yml` to skip them on every run.")
+    else:
+        lines.append("Leaving folders out does not bring the project under the cap.")
+    if tier == "pro":
+        lines.append("If you need the whole project checked, let us know your use case")
+    return "".join(f"\n{line}" for line in lines)
 
 
 def retry_text(err: FunnelError) -> str:
@@ -247,19 +274,20 @@ _CTA_TEMPLATES: dict[tuple[str, str], str] = {
     ),
     ("payload_too_large", "pro"): "Project exceeds the per-request payload cap — let us know your use case",
     ("atom_cap_exceeded", "anonymous"): (
-        "Project too dense ({err.size:,} atoms, {err.limit:,} cap). The cap is the same on every plan"
+        "Project too dense ({err.size:,} atoms, {err.limit:,} cap). The cap is the same on every plan."
     ),
     ("atom_cap_exceeded", "free"): (
-        "Project too dense ({err.size:,} atoms, {err.limit:,} cap). The cap is the same on every plan"
+        "Project too dense ({err.size:,} atoms, {err.limit:,} cap). The cap is the same on every plan."
     ),
-    ("atom_cap_exceeded", "pro"): "Project exceeds {err.limit:,}-atom cap — let us know your use case",
+    ("atom_cap_exceeded", "pro"): "Project exceeds {err.limit:,}-atom cap ({err.size:,} atoms).",
     ("project_limit_reached", "*"): "Project limit reached — file an issue with your use case so we can raise it",
     ("file_cap_exceeded", "*"): (
         "Project has {err.files:,} files, over the {err.limit:,}-file cap — the same cap on every plan"
     ),
     ("scoring_limit_exceeded", "*"): (
         "Project too large to score in one request. "
-        "Check a smaller part with `ails check <path>`, or file an issue with your use case"
+        "Leave folders out with `--exclude-dirs <folder>`, or list them under `exclude_dirs:` in "
+        "`.ails/config.yml`; excluded folders are not checked. Or file an issue with your use case"
     ),
     ("preflight_oversized", "*"): "Payload exceeds local cap before transmission",
 }

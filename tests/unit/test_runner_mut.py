@@ -146,7 +146,7 @@ def test_scan_combined_skips_unnamed_group_match() -> None:
     )
     results: list[dict[str, Any]] = []
     rule_defs: dict[str, dict[str, Any]] = {}
-    _scan_combined("bar", "f.md", [combined], results, rule_defs)
+    _scan_combined("bar", "f.md", [combined], results, rule_defs, [])
     assert results == []
 
 

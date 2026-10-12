@@ -19,12 +19,16 @@ from reporails_cli.core.platform.dto.diagnostics import (
     RETRYABLE_ERRORS,
     FunnelError,
 )
+from reporails_cli.core.platform.policy.exclusion import excluded_by_name
 
 logger = logging.getLogger(__name__)
 
 
 UNIVERSAL_ATOM_CAP = 10_000
 WIRE_MAX_FILES = 500
+
+# How many of the densest top-level folders a refusal names.
+_DENSE_DIRS_SHOWN = 5
 
 # A 5xx reply is parsed only when it names a failure that clears on its own.
 _RETRYABLE_STATUSES = (503, 504)
@@ -71,6 +75,8 @@ def parse_error_body(status_code: int, body_text: str, retry_after: str | None =
         logger.debug("Unexpected %d response shape: %r", status_code, body_text[:200])
         return None if retryable_status else _unknown_error(status_code, "")
     error = body.get("error", "")
+    if not (isinstance(error, str) and error) and isinstance(body.get("detail"), str):
+        error = body["detail"]
     if retryable_status and error not in RETRYABLE_ERRORS:
         return None
     if error not in KNOWN_ERRORS:
@@ -104,6 +110,104 @@ def _unknown_error(status_code: int, message: str, tier: str = "") -> FunnelErro
     )
 
 
+def _is_project_relative(path: str) -> bool:
+    """True for a project-relative posix path; `~/...` and absolute paths lie outside the project."""
+    return bool(path) and not path.startswith(("~/", "/")) and ":" not in path.split("/", 1)[0]
+
+
+def _atoms_per_file(payload: dict[str, Any]) -> dict[str, int]:
+    """Atom count per project-relative file path; files outside the project are left out."""
+    files = payload.get("files", [])
+    counts: dict[str, int] = {}
+    for atom in payload.get("atoms", []):
+        index = atom.get("fi") if isinstance(atom, dict) else None
+        if not isinstance(index, int) or not 0 <= index < len(files):
+            continue
+        path = str(files[index].get("path", "")) if isinstance(files[index], dict) else ""
+        if _is_project_relative(path):
+            counts[path] = counts.get(path, 0) + 1
+    return counts
+
+
+def _shown_dirs(per_file: dict[str, int], total: int) -> tuple[tuple[str, int], ...]:
+    """The five densest folder paths with their atom counts.
+
+    Starts at the project root and descends through any folder holding at least 90% of the
+    project's atoms (while it has subfolders), then lists the densest subfolders at that level.
+    """
+    prefix: tuple[str, ...] = ()
+    while True:
+        level: dict[tuple[str, ...], int] = {}
+        for path, n in per_file.items():
+            parts = tuple(path.split("/"))
+            if len(parts) > len(prefix) + 1 and parts[: len(prefix)] == prefix:
+                key = parts[: len(prefix) + 1]
+                level[key] = level.get(key, 0) + n
+        heavy = [key for key, n in level.items() if n * 10 >= total * 9]
+        if not heavy:
+            break
+        deeper = any(
+            len(p.split("/")) > len(heavy[0]) + 1 and tuple(p.split("/"))[: len(heavy[0])] == heavy[0] for p in per_file
+        )
+        if not deeper:
+            break
+        prefix = heavy[0]
+    ranked = sorted(level.items(), key=lambda item: (-item[1], item[0]))
+    return tuple(("/".join(key), n) for key, n in ranked[:_DENSE_DIRS_SHOWN])
+
+
+def _dense_dirs_and_route(payload: dict[str, Any], cap: int) -> tuple[tuple[tuple[str, int], ...], tuple[str, ...]]:
+    """The densest folder paths with their atom counts, and the folder names to leave out to get under `cap`.
+
+    A name removes every file with that name anywhere in its path (the way `--exclude-dirs`
+    works). The route keeps as much checked as possible: the one name with the smallest removal
+    that covers the excess, else names added by the most atoms not already removed until the
+    atoms left fit. It is empty when no set of names brings the project under the cap.
+    """
+    per_file = _atoms_per_file(payload)
+    total = len(payload.get("atoms", []))
+    return _shown_dirs(per_file, total), _route(_files_by_name(per_file), per_file, total - cap)
+
+
+def _files_by_name(per_file: dict[str, int]) -> dict[str, set[str]]:
+    """Each folder name -> the files `--exclude-dirs <name>` leaves out (the name anywhere in the path)."""
+    folders = frozenset(part for path in per_file for part in path.split("/")[:-1])
+    by_name: dict[str, set[str]] = {}
+    for path in per_file:
+        for part in set(path.split("/")):
+            if excluded_by_name((part,), folders):
+                by_name.setdefault(part, set()).add(path)
+    return by_name
+
+
+def _route(by_name: dict[str, set[str]], per_file: dict[str, int], excess: int) -> tuple[str, ...]:
+    """The folder names to leave out so at least `excess` atoms go, keeping the most checked; empty when none do."""
+
+    def weight(paths: set[str]) -> int:
+        return sum(per_file[path] for path in paths)
+
+    removal = {name: weight(paths) for name, paths in by_name.items()}
+    sufficient = sorted((n, name) for name, n in removal.items() if n >= excess)
+    if sufficient:
+        return (sufficient[0][1],)
+    if weight(set().union(*by_name.values())) < excess:
+        return ()
+    chosen: list[str] = []
+    covered: set[str] = set()
+    left = excess
+    while left > 0:
+        gain, best = min(
+            ((weight(paths - covered), name) for name, paths in by_name.items() if name not in chosen),
+            key=lambda item: (-item[0], item[1]),
+        )
+        if gain <= 0:
+            return ()
+        chosen.append(best)
+        covered |= by_name[best]
+        left -= gain
+    return tuple(chosen)
+
+
 def preflight_oversized(
     payload: dict[str, Any],
     has_api_key: bool,
@@ -112,6 +216,7 @@ def preflight_oversized(
     presumed_tier = "pro" if has_api_key else "anonymous"
     n_atoms = len(payload.get("atoms", []))
     if n_atoms > UNIVERSAL_ATOM_CAP:
+        dense_dirs, exclude_route = _dense_dirs_and_route(payload, UNIVERSAL_ATOM_CAP)
         return FunnelError(
             error="atom_cap_exceeded",
             tier=presumed_tier,
@@ -119,6 +224,8 @@ def preflight_oversized(
             size=n_atoms,
             files=len(payload.get("files", [])),
             upgrade_url=_preflight_url("atom_cap_exceeded", presumed_tier),
+            dense_dirs=dense_dirs,
+            exclude_route=exclude_route,
         )
     n_files = len(payload.get("files", []))
     if n_files > WIRE_MAX_FILES:

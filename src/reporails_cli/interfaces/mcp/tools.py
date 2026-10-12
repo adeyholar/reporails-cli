@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from reporails_cli.core.discovery.walk import safe_resolve
+from reporails_cli.core.lint.regex.not_evaluated import not_evaluated_scope
 from reporails_cli.core.platform.config.bootstrap import is_initialized
 from reporails_cli.formatters import mcp as mcp_formatter
 from reporails_cli.formatters.host_hooks import host_hooks_field
@@ -291,13 +292,16 @@ def _check_and_assemble(
 ) -> tuple[Any, Any]:
     """Run the local checks, then `_assemble_mcp_result`; the request is resolved under the agents whose rules ran."""
     pairs = _mcp_agent_file_pairs(scan_root, instruction_files, filter_agents, effective_agent)
+    with not_evaluated_scope() as unfinished:
+        local = _checks_over_pairs(scan_root, pairs, ruleset_map, scoped)
     return _assemble_mcp_result(
         scan_root,
         effective_agent,
         filter_agents,
         ruleset_map,
-        _checks_over_pairs(scan_root, pairs, ruleset_map, scoped),
+        local,
         rule_agents=tuple(dict.fromkeys(agent_id for agent_id, _ in pairs)),
+        not_evaluated=tuple(unfinished),
     )
 
 
@@ -337,6 +341,7 @@ def _build_assemble_inputs(
     ruleset_map: Any,
     local: tuple[list[Any], list[Any], list[Any]],
     rule_agents: tuple[str, ...] = (),
+    not_evaluated: tuple[tuple[str, str], ...] = (),
 ) -> Any:
     """The shared `AssembleInputs` for `_assemble_mcp_result`, built from the local M-probe /
     content / client finding lists."""
@@ -355,6 +360,7 @@ def _build_assemble_inputs(
         lint_result=None,
         alias_fn=rule_aliases,
         rule_agents=rule_agents,
+        not_evaluated=not_evaluated,
     )
 
 
@@ -374,13 +380,16 @@ def _assemble_mcp_result(
     ruleset_map: Any,
     local: tuple[list[Any], list[Any], list[Any]],
     rule_agents: tuple[str, ...] = (),
+    not_evaluated: tuple[tuple[str, str], ...] = (),
 ) -> tuple[Any, Any]:
     """Server-lint the local findings, then run the shared assemble spine. Returns `(result, funnel_error)`."""
     from dataclasses import replace
 
     from reporails_cli.core.pipeline.assemble import assemble_result
 
-    inputs = _build_assemble_inputs(scan_root, effective_agent, filter_agents, ruleset_map, local, rule_agents)
+    inputs = _build_assemble_inputs(
+        scan_root, effective_agent, filter_agents, ruleset_map, local, rule_agents, not_evaluated
+    )
     lint_result, funnel_error, notices = _server_lint_result(inputs)
     result = assemble_result(replace(inputs, lint_result=lint_result, notices=notices))
     return result, funnel_error

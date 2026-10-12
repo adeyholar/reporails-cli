@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import time
+from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
+from reporails_cli.core.discovery.agent_discovery import is_excluded
 from reporails_cli.core.platform.dto.diagnostics import (
     ENTITLED_TIERS,
     UNENTITLED_TIERS,
@@ -204,7 +208,11 @@ class TestParseErrorBody:
         assert err.error == "scoring_limit_exceeded"
         text = plain_cta(err)
         assert text.startswith("Project too large to score in one request.")
-        assert "ails check <path>" in text
+        assert "ails check <path>" not in text
+        assert "--exclude-dirs" in text
+        assert "exclude_dirs:" in text
+        assert "not checked" in text
+        assert "file an issue with your use case" in text
         assert "bug" not in text.lower()
 
     @pytest.mark.unit
@@ -748,3 +756,154 @@ class TestLintResponse:
         err = FunnelError(error=error_type, tier="pro")
         response = LintResponse(funnel_error=err)
         assert response.funnel_error is err
+
+
+def _dense_payload(spec: list[tuple[str, int]]) -> dict[str, object]:
+    return {
+        "files": [{"path": path} for path, _ in spec],
+        "atoms": [{"fi": i} for i, (_, n) in enumerate(spec) for _ in range(n)],
+    }
+
+
+def _atoms_left(payload: dict[str, object], route: tuple[str, ...]) -> int:
+    files = payload["files"]
+    excluded = frozenset(route)
+    left = 0
+    for atom in payload["atoms"]:  # type: ignore[attr-defined]
+        path = files[atom["fi"]]["path"]  # type: ignore[index]
+        outside = path.startswith(("~/", "/"))
+        if outside or not is_excluded(Path(path), Path(), excluded):
+            left += 1
+    return left
+
+
+class TestAtomCapRoute:
+    _SPEC: ClassVar[list[tuple[str, int]]] = [
+        ("docs/a.md", 4000),
+        ("src/docs/b.md", 1500),
+        ("api/c.md", 3500),
+        ("tests/d.md", 2500),
+        ("ROOT.md", 3500),
+        ("~/.claude/CLAUDE.md", 1000),
+    ]
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_funnel
+    def test_route_brings_the_project_under_the_cap(self) -> None:
+        payload = _dense_payload(self._SPEC)
+        err = preflight_oversized(payload, has_api_key=False)
+        assert err is not None
+        assert err.dense_dirs == (("docs", 4000), ("api", 3500), ("tests", 2500), ("src", 1500))
+        assert err.exclude_route == ("docs", "api")
+        assert _atoms_left(payload, err.exclude_route) <= UNIVERSAL_ATOM_CAP
+        assert _atoms_left(payload, err.exclude_route[:1]) > UNIVERSAL_ATOM_CAP
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_funnel
+    def test_nested_folder_sharing_a_name_counts_as_removed(self) -> None:
+        # "docs" alone (700) is short of the 800 excess; the nested src/docs (500) makes it enough.
+        spec = [("docs/a.md", 700), ("src/docs/b.md", 500), ("ROOT.md", 9800)]
+        payload = _dense_payload(spec)
+        err = preflight_oversized(payload, has_api_key=False)
+        assert err is not None
+        assert err.exclude_route == ("docs",)
+        assert _atoms_left(payload, err.exclude_route) == 9800
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_funnel
+    def test_wrapper_folder_route_names_the_smallest_sufficient_subfolder(self) -> None:
+        spec = [
+            (".claude/skills/s/SKILL.md", 8000),
+            (".claude/agents/a.md", 3300),
+            ("CLAUDE.md", 71),
+        ]
+        payload = _dense_payload(spec)
+        err = preflight_oversized(payload, has_api_key=False)
+        assert err is not None
+        assert err.dense_dirs == ((".claude/skills", 8000), (".claude/agents", 3300))
+        assert err.exclude_route == ("agents",)
+        assert _atoms_left(payload, err.exclude_route) == 8071
+        assert ".claude" not in err.exclude_route
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_funnel
+    def test_root_files_alone_over_the_cap_have_no_route(self, no_key: None) -> None:
+        payload = _dense_payload([("ROOT.md", UNIVERSAL_ATOM_CAP + 1)])
+        err = preflight_oversized(payload, has_api_key=False)
+        assert err is not None
+        assert err.exclude_route == ()
+        cta = plain_cta(err)
+        assert "does not bring the project under the cap" in cta
+        assert "--exclude-dirs" not in cta
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_funnel
+    def test_anonymous_and_pro_copy_carry_the_command_and_caveat(self, no_key: None) -> None:
+        payload = _dense_payload(self._SPEC)
+        for has_key in (False, True):
+            err = preflight_oversized(payload, has_api_key=has_key)
+            assert err is not None
+            cta = plain_cta(err)
+            assert "ails check --exclude-dirs docs --exclude-dirs api" in cta
+            assert "Excluded folders are not checked" in cta
+            assert "exclude_dirs:" in cta
+            assert "docs (4,000)" in cta
+            assert "ails check <" not in cta
+        assert err is not None
+        assert err.tier == "pro"
+        assert "let us know your use case" in cta
+        assert cta.rstrip().endswith("reporails.com/contact/atoms")
+        assert cta.index("--exclude-dirs") < cta.index("let us know your use case")
+        anonymous = plain_cta(preflight_oversized(payload, has_api_key=False))  # type: ignore[arg-type]
+        assert "use case" not in anonymous
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_funnel
+    def test_names_nested_in_a_chosen_name_are_not_added(self) -> None:
+        spec = [
+            (".claude/skills/s/SKILL.md", 3000),
+            (".claude/agents/a.md", 2000),
+            ("docs/x.md", 1500),
+            ("ROOT.md", 9500),
+        ]
+        payload = _dense_payload(spec)
+        err = preflight_oversized(payload, has_api_key=False)
+        assert err is not None
+        assert err.exclude_route == (".claude", "docs")
+        assert _atoms_left(payload, err.exclude_route) <= UNIVERSAL_ATOM_CAP
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_funnel
+    def test_many_folders_with_no_route_finish_quickly(self) -> None:
+        spec = [(f"d{i}/f.md", 1) for i in range(1500)] + [("ROOT.md", 10_500)]
+        payload = _dense_payload(spec)
+        start = time.perf_counter()
+        err = preflight_oversized(payload, has_api_key=False)
+        elapsed = time.perf_counter() - start
+        assert err is not None
+        assert err.exclude_route == ()
+        assert elapsed < 0.5
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_funnel
+    def test_server_atom_cap_refusal_for_pro_gives_the_reason_for_the_link(self) -> None:
+        err = FunnelError(
+            error="atom_cap_exceeded",
+            tier="pro",
+            limit=10_000,
+            size=12_000,
+            status=413,
+            upgrade_url="https://reporails.com/contact/atoms",
+        )
+        cta = plain_cta(err)
+        assert cta.startswith(
+            "Project exceeds 10,000-atom cap (12,000 atoms). \u2014 let us know your use case \u2192 "
+        )
+        assert cta.endswith("reporails.com/contact/atoms")
+        assert "Leave these out" not in cta
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_funnel
+    def test_server_atom_cap_refusal_for_anonymous_is_unchanged(self, no_key: None) -> None:
+        err = FunnelError(error="atom_cap_exceeded", tier="anonymous", limit=10_000, size=12_000, status=413)
+        assert "use case" not in plain_cta(err)

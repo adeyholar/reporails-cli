@@ -15,6 +15,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from reporails_cli.formatters.text.not_evaluated import group_not_evaluated, not_evaluated_sentence
+
 # The `workflow.locations` block (header plus rows) stays under this many characters.
 LOCATIONS_BUDGET = 4000
 # A location row names at most this many files, then `+N more`.
@@ -66,6 +68,7 @@ def render_text_view(payload: dict[str, Any]) -> str:
         _preservation_lines(payload),
         _conformance_lines(payload),
         _feedback_lines(payload, rules),
+        _not_evaluated_lines(payload),
         _truncated_lines(payload),
     )
     return "\n".join(line for section in sections for line in section)
@@ -384,6 +387,15 @@ def _feedback_lines(payload: dict[str, Any], rules: dict[str, Any]) -> list[str]
         how = f"op: {f['op']}" if f.get("op") else (f"fix: {f['fix']}" if f.get("fix") else "")
         lines.append("  - " + " — ".join(p for p in (f"{head} {where}".strip(), f.get("message"), how) if p))
     return lines
+
+
+def _not_evaluated_lines(payload: dict[str, Any]) -> list[str]:
+    pairs = [
+        (str(e.get("rule", "")), str(e.get("file", "")))
+        for e in payload.get("not_evaluated") or ()
+        if isinstance(e, dict)
+    ]
+    return [not_evaluated_sentence(file, rules) for file, rules in group_not_evaluated(pairs)]
 
 
 def _truncated_lines(payload: dict[str, Any]) -> list[str]:

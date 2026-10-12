@@ -337,6 +337,10 @@ class FunnelError:
     support_url: str = ""
     message: str = ""
     status: int | None = None
+    # Over the atom cap: the densest top-level folders with their atom counts, and the folders
+    # whose exclusion brings the project under the cap (empty when no set of folders does).
+    dense_dirs: tuple[tuple[str, int], ...] = ()
+    exclude_route: tuple[str, ...] = ()
 
     @property
     def retryable(self) -> bool:
