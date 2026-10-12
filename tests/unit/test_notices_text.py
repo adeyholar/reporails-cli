@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import re
 
 import pytest
 from rich.console import Console
@@ -89,3 +90,66 @@ def test_a_blank_line_prints_empty_and_an_emoji_code_prints_literally() -> None:
         Console(width=40, file=buf, force_terminal=False, highlight=False), [Notice("a", "info", "One\n\nTwo :smile:")]
     )
     assert buf.getvalue().splitlines() == ["  One", "", "  Two :smile:"]
+
+
+PROMO = Notice("p", "info", "Fixture promo.", "https://reporails.com/x", kind="promo")
+
+
+def _unlinked(out: str) -> str:
+    return re.sub(r"\x1b\]8;[^\x1b]*\x1b\\", "", out)
+
+
+def _render(notices: list[Notice], *, ascii_mode: bool | None = None, **console_args: object) -> str:
+    buf = io.StringIO()
+    args = {"force_terminal": True, "width": 80, "emoji": False, "highlight": False}
+    console = Console(file=buf, **{**args, **console_args})  # type: ignore[arg-type]
+    print_notices(console, notices, ascii_mode=ascii_mode)
+    return buf.getvalue()
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_cli_ux
+def test_promo_on_a_terminal_is_a_styled_block() -> None:
+    out = _render([PROMO], ascii_mode=False, color_system="standard")
+    lines = out.splitlines()
+    assert len(lines) == 4
+    assert "─" * 60 in lines[0]
+    assert "─" * 60 in lines[3]
+    assert "\x1b[1m" in lines[1]
+    assert "Fixture promo." in lines[1]
+    assert "→" in lines[2]
+    assert "https://reporails.com/x" in lines[2]
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_cli_ux
+@pytest.mark.parametrize(
+    "console_args", [{"no_color": True}, {"force_terminal": False}], ids=["no_color", "not_a_terminal"]
+)
+def test_promo_without_colour_prints_like_an_info_notice(console_args: dict) -> None:
+    out = _unlinked(_render([PROMO], ascii_mode=False, **console_args))
+    assert out == "  Fixture promo.\n  → https://reporails.com/x\n"
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_cli_ux
+def test_promo_in_ascii_mode_is_plain_with_an_ascii_arrow() -> None:
+    out = _unlinked(_render([PROMO], ascii_mode=True))
+    assert out == "  Fixture promo.\n  -> https://reporails.com/x\n"
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_cli_ux
+def test_ascii_arrow_applies_to_every_notice() -> None:
+    out = _unlinked(_render([Notice("a", "info", "Hi", "https://e.test")], ascii_mode=True))
+    assert "-> https://e.test" in out
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_cli_ux
+@pytest.mark.parametrize("plain", [False, True])
+def test_markup_in_promo_text_prints_literally(plain: bool) -> None:
+    promo = Notice("p", "info", "Pay [bold]now[/bold] [red]x[/red]", "https://e.test/[a]", kind="promo")
+    out = _render([promo], ascii_mode=plain)
+    assert "Pay [bold]now[/bold] [red]x[/red]" in out
+    assert "https://e.test/[a]" in out

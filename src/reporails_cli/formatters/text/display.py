@@ -313,13 +313,13 @@ def _print_header(tier: str) -> None:
     console.print(f"\n[bold]Reporails[/bold] \u2014 Diagnostics{tier_badge}\n")
 
 
-def _print_notices(notices: Any) -> None:
+def _print_notices(notices: Any, ascii_mode: bool) -> None:
     """Print the notices under the header, then a blank line; nothing when there are none."""
     if not notices:
         return
     from reporails_cli.formatters.text.notices import print_notices
 
-    print_notices(console, notices)
+    print_notices(console, notices, ascii_mode=ascii_mode)
     console.print()
 
 
@@ -356,7 +356,7 @@ def print_text_result(
     scope.type_str = file_type_summary(all_files, skill_of) if all_files else "0 files"
 
     _print_header(tier)
-    _print_notices(result.notices)
+    _print_notices(result.notices, ascii_mode)
     if not result.findings:
         console.print(f"  {'ok' if ascii_mode else chr(0x2713)}  No findings.")
         print_not_evaluated(console, result.not_evaluated)

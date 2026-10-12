@@ -20,7 +20,7 @@ import typer
 from rich.markup import escape
 
 from reporails_cli.core.platform.adapters.key_check import check_api_key
-from reporails_cli.core.platform.adapters.notices_seen import due_notices
+from reporails_cli.core.platform.adapters.notices_seen import due_notices, visible_notices
 from reporails_cli.core.platform.adapters.sign_in import poll_sign_in, revoke_sign_in, start_sign_in
 from reporails_cli.core.platform.config.credentials import (
     clear_credentials,
@@ -67,7 +67,7 @@ def _signed_in_line(account: str, tier: str) -> str:
 
 def _print_notices(notices: tuple[Notice, ...]) -> None:
     """The notices not yet shown today, as the server worded them."""
-    print_notices(console, due_notices(notices))
+    print_notices(console, due_notices(visible_notices(notices)))
 
 
 def _note_env_override(saved_key: str) -> None:

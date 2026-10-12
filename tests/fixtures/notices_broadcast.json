@@ -1,0 +1,168 @@
+{
+  "about": "Site-wide notices with an audience, a date window, an active switch and a kind. notices_global is the stored record: each entry's fields in the order id, level, text, url, audience, starts, ends, kind, active, with a default left out (audience both, no window, kind notice, active true). Each case is one caller (anonymous or authenticated) on one UTC day, and delivered is the list that caller receives, in order, as {id, level, text, url?, kind?}.",
+  "notices_global": {
+    "notices": [
+      {
+        "id": "promo-anonymous-october",
+        "level": "info",
+        "text": "Fixture promo for anonymous callers, 1 to 31 October.",
+        "url": "https://example.com/promo",
+        "audience": "anonymous",
+        "starts": "2026-10-01",
+        "ends": "2026-10-31",
+        "kind": "promo"
+      },
+      {
+        "id": "promo-authenticated",
+        "level": "info",
+        "text": "Fixture promo for signed-in callers, no end date.",
+        "audience": "authenticated",
+        "kind": "promo"
+      },
+      {
+        "id": "warn-one-day",
+        "level": "warn",
+        "text": "Fixture warning for every caller on 20 October only.",
+        "url": "https://example.com/status",
+        "starts": "2026-10-20",
+        "ends": "2026-10-20"
+      },
+      {
+        "id": "plain-defaults",
+        "level": "info",
+        "text": "Fixture notice with every default."
+      },
+      {
+        "id": "promo-inactive",
+        "level": "info",
+        "text": "Fixture promo that is switched off.",
+        "kind": "promo",
+        "active": false
+      }
+    ]
+  },
+  "cases": [
+    {
+      "caller": "anonymous",
+      "date": "2026-09-30",
+      "delivered": [
+        {
+          "id": "plain-defaults",
+          "level": "info",
+          "text": "Fixture notice with every default."
+        }
+      ]
+    },
+    {
+      "caller": "anonymous",
+      "date": "2026-10-01",
+      "delivered": [
+        {
+          "id": "promo-anonymous-october",
+          "level": "info",
+          "text": "Fixture promo for anonymous callers, 1 to 31 October.",
+          "url": "https://example.com/promo",
+          "kind": "promo"
+        },
+        {
+          "id": "plain-defaults",
+          "level": "info",
+          "text": "Fixture notice with every default."
+        }
+      ]
+    },
+    {
+      "caller": "anonymous",
+      "date": "2026-10-20",
+      "delivered": [
+        {
+          "id": "promo-anonymous-october",
+          "level": "info",
+          "text": "Fixture promo for anonymous callers, 1 to 31 October.",
+          "url": "https://example.com/promo",
+          "kind": "promo"
+        },
+        {
+          "id": "warn-one-day",
+          "level": "warn",
+          "text": "Fixture warning for every caller on 20 October only.",
+          "url": "https://example.com/status"
+        },
+        {
+          "id": "plain-defaults",
+          "level": "info",
+          "text": "Fixture notice with every default."
+        }
+      ]
+    },
+    {
+      "caller": "authenticated",
+      "date": "2026-10-20",
+      "delivered": [
+        {
+          "id": "promo-authenticated",
+          "level": "info",
+          "text": "Fixture promo for signed-in callers, no end date.",
+          "kind": "promo"
+        },
+        {
+          "id": "warn-one-day",
+          "level": "warn",
+          "text": "Fixture warning for every caller on 20 October only.",
+          "url": "https://example.com/status"
+        },
+        {
+          "id": "plain-defaults",
+          "level": "info",
+          "text": "Fixture notice with every default."
+        }
+      ]
+    },
+    {
+      "caller": "anonymous",
+      "date": "2026-10-31",
+      "delivered": [
+        {
+          "id": "promo-anonymous-october",
+          "level": "info",
+          "text": "Fixture promo for anonymous callers, 1 to 31 October.",
+          "url": "https://example.com/promo",
+          "kind": "promo"
+        },
+        {
+          "id": "plain-defaults",
+          "level": "info",
+          "text": "Fixture notice with every default."
+        }
+      ]
+    },
+    {
+      "caller": "authenticated",
+      "date": "2026-10-31",
+      "delivered": [
+        {
+          "id": "promo-authenticated",
+          "level": "info",
+          "text": "Fixture promo for signed-in callers, no end date.",
+          "kind": "promo"
+        },
+        {
+          "id": "plain-defaults",
+          "level": "info",
+          "text": "Fixture notice with every default."
+        }
+      ]
+    },
+    {
+      "caller": "anonymous",
+      "date": "2026-11-01",
+      "delivered": [
+        {
+          "id": "plain-defaults",
+          "level": "info",
+          "text": "Fixture notice with every default."
+        }
+      ]
+    }
+  ]
+}

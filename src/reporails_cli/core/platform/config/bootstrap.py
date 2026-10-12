@@ -11,6 +11,11 @@ from reporails_cli.core.platform.config.bundled import get_bundled_package_root,
 logger = logging.getLogger(__name__)
 
 
+def env_flag(var_name: str) -> bool:
+    """True when the env var is set to anything but blank, 0, false, no or off (case and spaces ignored)."""
+    return os.environ.get(var_name, "").strip().lower() not in ("", "0", "false", "no", "off")
+
+
 def parse_idle_timeout_env(var_name: str, default_s: int) -> int | None:
     """Parse an idle-timeout env var (seconds): unset/blank/non-numeric → default,
     a positive int → that value, 0 or negative → None (idle shutdown disabled)."""

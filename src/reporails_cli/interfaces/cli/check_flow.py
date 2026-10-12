@@ -147,6 +147,8 @@ class CheckRender:
     excluded: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
     elapsed_ms: float = 0.0
     heal_authed: bool = False
+    # Announcements are left out of this run's notices (`--no-promo`).
+    no_promo: bool = False
 
 
 @dataclass
@@ -353,10 +355,10 @@ def _flow_pipeline(state: CheckState) -> None:
     from reporails_cli.core.platform.observability.stage_timer import get_stage_timer
 
     state.pipeline.start_time = time.perf_counter()
-    import os
+    from reporails_cli.core.platform.config.bootstrap import env_flag
 
     state.pipeline.stage_timer = get_stage_timer()
-    state.pipeline.stage_timer.configure(enabled=bool(os.environ.get("AILS_STAGE_TIMING")))
+    state.pipeline.stage_timer.configure(enabled=env_flag("AILS_STAGE_TIMING"))
 
     show_progress = sys.stdout.isatty() and state.targets.output_format not in ("json", "github")
     progress: Callable[[str], None] = (
@@ -439,6 +441,7 @@ def _flow_server_lint(state: CheckState, show_progress: bool, spinner: Any) -> N
     """Send local findings to the server and unpack the lint response onto the pipeline state."""
     from reporails_cli.core.pipeline.assemble import lint_request_local
     from reporails_cli.core.platform.adapters.api_client import AilsClient
+    from reporails_cli.core.platform.adapters.notices_seen import visible_notices
 
     if show_progress:
         spinner.update("[bold]Diagnosing...[/bold]")
@@ -448,7 +451,7 @@ def _flow_server_lint(state: CheckState, show_progress: bool, spinner: Any) -> N
         response = AilsClient().lint(state.pipeline.ruleset_map, local, structural_required, root=state.targets.target)
     state.pipeline.lint_result = response.result if response else None
     state.pipeline.funnel_error = response.funnel_error if response else None
-    state.pipeline.notices = response.notices if response else ()
+    state.pipeline.notices = visible_notices(response.notices if response else (), no_promo=state.render.no_promo)
     state.pipeline.stage_timer.mark("server")
 
 

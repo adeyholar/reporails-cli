@@ -169,5 +169,5 @@ def test_output_heal_results_json_carries_notices() -> None:
         _output_heal_results([], [], True, 1.0, "json", _Console(), (notice,))
     data = json.loads(buf.getvalue())
     assert data["notices"] == [
-        {"id": "pay", "level": "warn", "text": "Payment failed", "url": "https://example.test/pay"}
+        {"id": "pay", "level": "warn", "text": "Payment failed", "url": "https://example.test/pay", "kind": "notice"}
     ]

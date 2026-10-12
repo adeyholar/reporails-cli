@@ -18,6 +18,7 @@ from typing import Any
 from reporails_cli.core.platform.adapters.notices_wire import NOTICES_HEADER, notices_from_header
 from reporails_cli.core.platform.adapters.rate_cooldown import active_cooldown, record_cooldown
 from reporails_cli.core.platform.adapters.workflow_wire import _opt_int, deserialize_workflow
+from reporails_cli.core.platform.config.bootstrap import env_flag
 from reporails_cli.core.platform.config.credentials import env_api_key
 from reporails_cli.core.platform.contract.errors import (
     ConfigUnreadableError,
@@ -254,7 +255,7 @@ class AilsClient:
 
     def _sent_stored_key(self) -> bool:
         """True only for a request to the real service that carried the key as its Authorization header."""
-        dev_mode = os.environ.get("AILS_DEV_MODE", "").lower() in ("true", "1")
+        dev_mode = env_flag("AILS_DEV_MODE")
         return bool(self.api_key) and not dev_mode and self.base_url.rstrip("/") == DEFAULT_SERVER_URL.rstrip("/")
 
     def _remember_tier(self, tier: str) -> None:
@@ -268,7 +269,7 @@ class AilsClient:
         """The diagnose URL and request headers for this client, for a body of `content_type`."""
         base = self.base_url.rstrip("/")
         ua = _user_agent()
-        if os.environ.get("AILS_DEV_MODE", "").lower() in ("true", "1"):
+        if env_flag("AILS_DEV_MODE"):
             return f"{base}/diagnose", {"X-Tier": self.tier, "Content-Type": content_type, "User-Agent": ua}
         headers = {"Content-Type": content_type, "User-Agent": ua}
         if self.api_key:

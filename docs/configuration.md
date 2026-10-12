@@ -70,6 +70,7 @@ For a single-value setting the project value wins. So if global says `default_ag
 | Variable             | What it does                                                                                                                                      |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `AILS_PLUGIN_SOURCE` | Where `ails install` adds the reporails plugin from, for Claude Code and Codex. A local folder or `owner/repo`; unset, it is `reporails/plugin`. |
+| `AILS_NO_PROMO`      | Set to any value except 0, false, no or off to hide announcements from reporails, the same as `ails check --no-promo`. Messages about your account still show.                    |
 
 ## Model cache
 
@@ -83,7 +84,7 @@ export AILS_MODEL_URL="https://mirror.example.com/reporails-model"
 
 `AILS_MODEL_URL` is the base URL; Reporails appends each model file's name to it, flattening any `/` in the file's own path to `__`, so a mirror serves one flat directory. To build one, run a check once on a machine that can reach the default host, then copy every file under `~/.reporails/cache/models/<version>/` to the mirror, naming each file by its path inside that folder with every `/` replaced by `__`. Unset, the model downloads from `https://models.reporails.com` — allow that host through a firewall or proxy for the first run. When you are signed in (`ails login` or `AILS_API_KEY`), that download carries your API key; the key is never sent to an `AILS_MODEL_URL` host.
 
-To never download, set `AILS_MODEL_OFFLINE=1`. Reporails then uses a model already on disk and, without one, runs without the content checks.
+To never download, set `AILS_MODEL_OFFLINE=1` (any value except 0, false, no or off turns it on). Reporails then uses a model already on disk and, without one, runs without the content checks.
 
 ### Caching the model in CI
 
@@ -442,7 +443,7 @@ Do not key a "is this a paid run?" check off `pro{}` — it is the *upgrade hint
 
 Always present, regardless of tier: `offline`, `server_error`, `tier`, `quality`, `level`, `files{}`, `stats`, `top_rules`, `notices`, `not_evaluated`, `excluded`, `elapsed_ms`. `quality` is `null` when no score was computed (an offline run). `server_error` is `null` when the server answered; when the request was rejected, timed out, or failed it carries `{status, error, message, upgrade_url, tier}` — so a designed offline run and a real outage are distinguishable rather than both reading as "no score". `surface_health[]` is added when surfaces are populated; each entry carries `name`, `score`, `file_count`, `finding_count`, and a per-category `category_breakdown` map. An entry's `type` is `repetition` (one instruction repeated nearly verbatim in two files) or `overlap` (one same-topic line pair of two files that can load together). `stats.cross_file_overlaps` counts the overlapping file pairs. `cross_file[]` and `cross_file_coordinates[]` are tier-exclusive (see the table above) and both are absent when the run has no cross-file findings.
 
-`notices` is a list of short messages about your account, such as a failed payment, Pro ending on a date, Pro having ended, or an announcement. Each entry is `{id, level, text, url}`: `level` is `info` or `warn`, and `url` is `""` when there is no link. The list is `[]` when there are no messages. Text output prints warnings on every run and other messages once a day; `--format json` and the MCP `validate` reply carry all of them. If you build on the JSON, show each notice to the user.
+`notices` is a list of short messages about your account, such as a failed payment, Pro ending on a date, Pro having ended, or an announcement. Each entry is `{id, level, text, url, kind}`: `level` is `info` or `warn`, `kind` is `notice` or `promo` (an announcement), and `url` is `""` when there is no link. The list is `[]` when there are no messages. Text output prints warnings on every run and other messages once a day. An announcement shows once a day whatever its level, and `ails check --no-promo` or `AILS_NO_PROMO=1` hides announcements; messages about your account still show. `--format json` and the MCP `validate` reply carry every message (announcements left out when hidden), and `--format github` leaves announcements out of its annotations. If you build on the JSON, show each notice to the user.
 
 `not_evaluated` lists the checks that did not finish on a file, as `{rule, file}`; it is `[]` when every check finished. A check that runs out of time on a very large file reports no finding for that file rather than a guess, so a rule named here was neither passed nor failed there. Text output names them in one line per file under the results.
 

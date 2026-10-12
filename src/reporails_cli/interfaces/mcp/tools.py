@@ -11,6 +11,7 @@ from typing import Any
 
 from reporails_cli.core.discovery.walk import safe_resolve
 from reporails_cli.core.lint.regex.not_evaluated import not_evaluated_scope
+from reporails_cli.core.platform.adapters.notices_seen import visible_notices
 from reporails_cli.core.platform.config.bootstrap import is_initialized
 from reporails_cli.formatters import mcp as mcp_formatter
 from reporails_cli.formatters.host_hooks import host_hooks_field
@@ -384,7 +385,7 @@ def _server_lint_result(inputs: Any) -> tuple[Any, Any, tuple[Any, ...]]:
     response = _server_lint(inputs)
     if response is None:
         return None, None, ()
-    return response.result, response.funnel_error, response.notices
+    return response.result, response.funnel_error, visible_notices(response.notices)
 
 
 def _assemble_mcp_result(

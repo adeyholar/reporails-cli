@@ -332,8 +332,8 @@ def _format_workflow(wf: Any, project_root: Path) -> dict[str, Any]:
 
 
 def format_notices(notices: Any) -> list[dict[str, str]]:
-    """Account notices as the JSON documents carry them."""
-    return [{"id": n.id, "level": n.level, "text": n.text, "url": n.url} for n in notices]
+    """Notices as the JSON documents carry them."""
+    return [{"id": n.id, "level": n.level, "text": n.text, "url": n.url, "kind": n.kind} for n in notices]
 
 
 def format_server_error(server_error: Any) -> dict[str, Any] | None:

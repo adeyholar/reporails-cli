@@ -121,3 +121,23 @@ def test_more_than_the_cap_keeps_the_first_ten() -> None:
 def test_unhashable_level_is_dropped_not_raised(level: object) -> None:
     got = notices_from_list([{"id": "x", "level": level, "text": "t"}, GOOD])
     assert got == (Notice("a", "warn", "Payment failed", "https://example.test/pay"),)
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_cli_ux
+@pytest.mark.parametrize(
+    ("entry", "kind"),
+    [
+        ({"kind": "promo"}, "promo"),
+        ({}, "notice"),
+        ({"kind": "notice"}, "notice"),
+        ({"kind": "banner"}, "notice"),
+        ({"kind": "Promo"}, "notice"),
+        ({"kind": 1}, "notice"),
+        ({"kind": ["promo"]}, "notice"),
+        ({"kind": None}, "notice"),
+    ],
+)
+def test_kind_is_promo_only_when_exactly_promo(entry: dict, kind: str) -> None:
+    got = notices_from_list([{**GOOD, **entry, "extra": "ignored"}])
+    assert got == (Notice("a", "warn", "Payment failed", "https://example.test/pay", kind),)

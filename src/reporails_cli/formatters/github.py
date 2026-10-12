@@ -105,11 +105,12 @@ def format_result(
 
 
 def _notice_annotations(notices: Any) -> list[str]:
-    """One `::warning` (a `warn` notice) or `::notice` line per account notice."""
+    """One `::warning` (a `warn` notice) or `::notice` line per notice; announcements get none."""
     return [
         f"::{'warning' if n.level == 'warn' else 'notice'} title=reporails::"
         + _escape_workflow_data(f"{n.text} {n.url}".strip())
         for n in notices
+        if n.kind != "promo"
     ]
 
 
