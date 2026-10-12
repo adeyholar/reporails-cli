@@ -15,7 +15,7 @@ callback.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -59,8 +59,55 @@ def discover_scope(
 
     exclusions = load_run_exclusions(target, exclude_dirs, exclude_files)
     detected, resolved, files = _scan(target, agent, exclusions, scan_files)
-    excluded = exclusions.record(sorted(named)) if scan_files else ((), ())
-    return ScopeDiscovery(detected, *resolved, files, excluded, exclusions)
+    found = ScopeDiscovery(detected, *resolved, files, exclusions.record() if scan_files else ((), ()), exclusions)
+    return with_named(found, named) if scan_files and named else found
+
+
+def with_named(found: ScopeDiscovery, paths: Iterable[Path]) -> ScopeDiscovery:
+    """`found` with each path the user named put back where the run's exclusions left it out.
+
+    A path that detection held (a command-line folder or a file glob) returns to the agent that held it;
+    a path the walk never entered (a config folder) joins the effective agent's instruction files.
+    The Excluded record then omits the patterns that matched a named path.
+    """
+    from reporails_cli.core.discovery.agents import DetectedAgent, get_known_agents
+    from reporails_cli.core.discovery.walk import safe_resolve
+
+    exclusions = found.exclusions
+    if exclusions is None:
+        return found
+    named = sorted(set(paths))
+    filtered = [
+        DetectedAgent(
+            a.agent_type, list(a.instruction_files), list(a.config_files), list(a.rule_files), a.detected_directories
+        )
+        for a in found.filtered
+    ]
+    files = list(found.files)
+    held = {safe_resolve(f) for f in files}
+    for path in (p for p in named if exclusions.leaves_out(p) and safe_resolve(p) not in held):
+        owner, kind = _held_by(found.detected, path) or (found.effective_agent, "instruction_files")
+        holder = next((a for a in filtered if a.agent_type.id == owner), None)
+        if holder is None and owner in get_known_agents():
+            holder = DetectedAgent(get_known_agents()[owner])
+            filtered.append(holder)
+        if holder is not None:
+            getattr(holder, kind).append(path)
+        files.append(path)
+        held.add(safe_resolve(path))
+    return found._replace(filtered=filtered, files=files, excluded=exclusions.record(named))
+
+
+def _held_by(detected: list[Any], path: Path) -> tuple[str, str] | None:
+    """The `(agent id, file list name)` of the detected agent that listed `path`, or None."""
+    from reporails_cli.core.discovery.walk import safe_resolve
+
+    wanted = safe_resolve(path)
+    for det in detected:
+        for kind in ("instruction_files", "rule_files", "config_files"):
+            if any(safe_resolve(f) == wanted for f in getattr(det, kind)):
+                return det.agent_type.id, kind
+    return None
 
 
 def _scan(

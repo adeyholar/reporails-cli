@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from reporails_cli.core.discovery.walk import safe_resolve
+from reporails_cli.core.discovery.exclusions import RunExclusions
 from reporails_cli.core.lint.regex.compiler import display_severity
 from reporails_cli.core.platform.dto.models import LocalFinding, Rule, RuleType
 
@@ -143,34 +143,12 @@ def _extend_with_generic(
     return effective
 
 
-def _drop_excluded(
-    classified: list[Any],
-    exclude_files: list[str] | None,
-    project_dir: Path,
-    keep: list[Path] | None = None,
-) -> list[Any]:
-    """Drop link-walked classified files matching `exclude_files`. The generic-scan link
-    walk re-discovers @import-reached files agent discovery already excluded, so the
-    exclusion is re-applied here. An EXPLICITLY-targeted file in `keep` is never dropped —
-    naming a file (even one matching an exclude glob) overrides the project exclusion, so
-    the file still gets scored instead of returning a falsely-clean empty result."""
-    if not exclude_files:
-        return classified
-    from reporails_cli.core.platform.utils.utils import matches_any_glob
-
-    keep_resolved = {safe_resolve(p) for p in keep} if keep else set()
-    return [
-        cf
-        for cf in classified
-        if safe_resolve(cf.path) in keep_resolved or not matches_any_glob(cf.path, exclude_files, project_dir)
-    ]
-
-
 def _classify_agent_files(
     project_dir: Path,
     instruction_files: list[Path],
     agent: str,
     skills: Mapping[str, str] | None = None,
+    exclusions: RunExclusions | None = None,
 ) -> tuple[list[Any], bool]:
     """Classify `instruction_files` with `agent`'s file types; also return whether generic scanning is on."""
     from reporails_cli.core.classify import classify_files, load_file_types
@@ -180,14 +158,17 @@ def _classify_agent_files(
     try:
         _config = get_project_config(project_dir)
         generic_scanning = _config.generic_scanning
-        exclude_files = _config.exclude_files
     except (OSError, ValueError):
         generic_scanning = False
-        exclude_files = None
     classified = classify_files(
-        project_dir, instruction_files, file_types, generic_scanning=generic_scanning, skills=skills
+        project_dir,
+        instruction_files,
+        file_types,
+        generic_scanning=generic_scanning,
+        skills=skills,
+        exclusions=exclusions,
     )
-    return _drop_excluded(classified, exclude_files, project_dir, keep=instruction_files), generic_scanning
+    return classified, generic_scanning
 
 
 def run_m_probes(
@@ -197,6 +178,7 @@ def run_m_probes(
     scoped: bool = False,
     project_checks: str = "all",
     skills: Mapping[str, str] | None = None,
+    exclusions: RunExclusions | None = None,
 ) -> list[LocalFinding]:
     """Run M-probe checks (mechanical + deterministic) against instruction files.
 
@@ -211,7 +193,7 @@ def run_m_probes(
 
     scan_dir = project_dir if project_dir.is_dir() else project_dir.parent
     rules = load_rules(project_root=project_dir, scan_root=scan_dir, agent=agent)
-    classified, generic_scanning = _classify_agent_files(project_dir, instruction_files, agent, skills)
+    classified, generic_scanning = _classify_agent_files(project_dir, instruction_files, agent, skills, exclusions)
     effective_files = _extend_with_generic(instruction_files, classified, generic_scanning)
 
     findings: list[LocalFinding] = []
@@ -230,6 +212,7 @@ def _project_wide_findings(
     pairs: list[tuple[str, list[Path]]],
     scoped: bool = False,
     skills: Mapping[str, str] | None = None,
+    exclusions: RunExclusions | None = None,
 ) -> list[LocalFinding]:
     """The core rules' project-wide checks over every pair's files, each classified by its own agent.
 
@@ -243,7 +226,7 @@ def _project_wide_findings(
     seen: dict[Path, tuple[str, Any]] = {}
     replaced_by: dict[str, set[str]] = {}
     for agent_id, agent_files in pairs:
-        for cf in _classify_agent_files(project_dir, agent_files, agent_id, skills)[0]:
+        for cf in _classify_agent_files(project_dir, agent_files, agent_id, skills, exclusions)[0]:
             seen.setdefault(cf.path, (agent_id, cf))
         if agent_id:
             for rule in load_rules(project_root=project_dir, scan_root=scan_dir, agent=agent_id).values():
@@ -264,6 +247,7 @@ def run_m_probes_over_pairs(
     pairs: list[tuple[str, list[Path]]],
     scoped: bool = False,
     skills: Mapping[str, str] | None = None,
+    exclusions: RunExclusions | None = None,
 ) -> list[LocalFinding]:
     """Run the M-probes once per ``(agent, its files)`` pair, with project-wide checks once.
 
@@ -277,10 +261,18 @@ def run_m_probes_over_pairs(
     findings: list[LocalFinding] = []
     for agent_id, agent_files in pairs:
         findings.extend(
-            run_m_probes(project_dir, agent_files, agent=agent_id, scoped=scoped, project_checks=mode, skills=skills)
+            run_m_probes(
+                project_dir,
+                agent_files,
+                agent=agent_id,
+                scoped=scoped,
+                project_checks=mode,
+                skills=skills,
+                exclusions=exclusions,
+            )
         )
     if several:
-        findings.extend(_project_wide_findings(project_dir, pairs, scoped=scoped, skills=skills))
+        findings.extend(_project_wide_findings(project_dir, pairs, scoped=scoped, skills=skills, exclusions=exclusions))
     return findings
 
 
@@ -289,6 +281,7 @@ def run_content_quality_checks(
     project_dir: Path,
     instruction_files: list[Path] | None = None,
     agent: str = "",
+    exclusions: RunExclusions | None = None,
 ) -> list[LocalFinding]:
     """Run content-quality checks (type=content_query) against RulesetMap atoms.
 
@@ -315,17 +308,15 @@ def run_content_quality_checks(
         try:
             _config = get_project_config(project_dir)
             generic_scanning = _config.generic_scanning
-            exclude_files = _config.exclude_files
         except (OSError, ValueError):
             generic_scanning = False
-            exclude_files = None
         classified = classify_files(
             project_dir,
             instruction_files,
             file_types,
             generic_scanning=generic_scanning,
             skills=skill_membership(ruleset_map),
+            exclusions=exclusions,
         )
-        classified = _drop_excluded(classified, exclude_files, project_dir, keep=instruction_files)
 
     return run_content_checks(ruleset_map, rules, classified)

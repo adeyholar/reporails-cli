@@ -134,4 +134,8 @@ def test_mcp_discovery_that_excludes_everything_still_names_the_exclusions(tmp_p
     clear_agent_cache()
     payload = tools._discover_files(project)
     assert isinstance(payload, dict)
-    assert payload["excluded"] == {"dirs": [".claude", "pkg"], "files": ["AGENTS.md", "CLAUDE.md"]}
+    assert payload["excluded"] == {
+        "dirs": [".claude", "pkg"],
+        "files": ["AGENTS.md", "CLAUDE.md"],
+        "imported_text_counted": False,
+    }

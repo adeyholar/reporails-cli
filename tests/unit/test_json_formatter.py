@@ -581,12 +581,16 @@ class TestExcludedBlock:
     @pytest.mark.subsys_diagnostic
     def test_lists_what_the_user_left_out(self) -> None:
         data = format_combined_result(_result(excluded_dirs=("agents",), excluded_files=("*.generated.md",)))
-        assert data["excluded"] == {"dirs": ["agents"], "files": ["*.generated.md"]}
+        assert data["excluded"] == {"dirs": ["agents"], "files": ["*.generated.md"], "imported_text_counted": False}
 
     @pytest.mark.unit
     @pytest.mark.subsys_diagnostic
     def test_present_and_empty_when_nothing_was_excluded(self) -> None:
-        assert format_combined_result(_result())["excluded"] == {"dirs": [], "files": []}
+        assert format_combined_result(_result())["excluded"] == {
+            "dirs": [],
+            "files": [],
+            "imported_text_counted": False,
+        }
 
     @pytest.mark.unit
     @pytest.mark.subsys_diagnostic
@@ -594,7 +598,11 @@ class TestExcludedBlock:
         from reporails_cli.formatters.mcp import bound_validate_payload
 
         data = format_combined_result(_result(excluded_dirs=("agents",)))
-        assert bound_validate_payload(data)["excluded"] == {"dirs": ["agents"], "files": []}
+        assert bound_validate_payload(data)["excluded"] == {
+            "dirs": ["agents"],
+            "files": [],
+            "imported_text_counted": False,
+        }
 
     @pytest.mark.unit
     @pytest.mark.subsys_diagnostic
@@ -602,5 +610,5 @@ class TestExcludedBlock:
         from reporails_cli.formatters.json import empty_result_payload
 
         payload = empty_result_payload(None, (("agents",), ("a.md",)))
-        assert payload["excluded"] == {"dirs": ["agents"], "files": ["a.md"]}
-        assert empty_result_payload()["excluded"] == {"dirs": [], "files": []}
+        assert payload["excluded"] == {"dirs": ["agents"], "files": ["a.md"], "imported_text_counted": False}
+        assert empty_result_payload()["excluded"] == {"dirs": [], "files": [], "imported_text_counted": False}

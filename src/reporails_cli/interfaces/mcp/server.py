@@ -224,7 +224,8 @@ async def _fresh_validate_payload(
         selection = resolved
     # Blocking pipeline work (mapping, m-probes, server lint) runs off the event loop so a
     # slow map/lint never blocks other concurrent tool calls.
-    payload, ruleset_map, score = await asyncio.to_thread(run_pipeline_for_path, path, True)
+    named = (frozenset(selection[0]),) if selection is not None and selection[0] else ()
+    payload, ruleset_map, score = await asyncio.to_thread(run_pipeline_for_path, path, True, *named)
     if selection is not None and "files" in payload:
         payload = keep_target_locations(payload, *selection, scan_root, tokens)
     if "files" in payload:

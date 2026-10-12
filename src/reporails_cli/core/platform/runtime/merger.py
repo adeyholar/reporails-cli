@@ -144,6 +144,8 @@ class CombinedResult:
     # The folders and file globs the user left out of the run (built-in default excludes are not listed).
     excluded_dirs: tuple[str, ...] = ()
     excluded_files: tuple[str, ...] = ()
+    # True when a checked file imports text from a file the user left out; that text still counts there.
+    excluded_imported: bool = False
 
 
 def _collect_server_diagnostics(

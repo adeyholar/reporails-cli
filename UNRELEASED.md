@@ -8,6 +8,10 @@
 ### Changed
 
 - Check: file patterns you leave out with `--exclude-files` now add to the `exclude_files:` patterns in your config instead of replacing them, the same way `--exclude-dirs` adds to `exclude_dirs:`.
+- Check: a file or capability you name on the command line (`ails check docs/a.md`, `ails check skills:backlog`) is checked even inside a folder you left out, and it is no longer listed on the `Excluded` line.
+- Check: with `generic_scanning: true`, a file or folder you leave out is no longer checked through an `@` import or a link.
+- Check: text a checked file imports with `@path` from a file you left out still counts inside the importing file, and the `Excluded` line ends with `; imported text in checked files still counts`. `ails check -f json` and the MCP `validate` reply carry `imported_text_counted` under `excluded`; it is `false` when no import crosses into a left-out file.
+- Check: a capability folder you leave out (such as `.claude/skills/`) is no longer counted as present, so it no longer raises your level.
 - Check: a project over the 10,000-atom cap now gets a route to a score. The message names the densest folders with their atom counts and gives one ready `ails check --exclude-dirs …` command that leaves out enough of them for the rest of the project to be checked and scored, keeping as much checked as it can. It says excluded folders are not checked and that `exclude_dirs:` in `.ails/config.yml` keeps them out on every run. Pro keeps the contact link after the route.
 - Check: when you leave folders or files out of a run (`--exclude-dirs`, `--exclude-files`, or `exclude_dirs:` / `exclude_files:` in your config), the summary names them on an `Excluded` line under the score: they are not checked, and the score covers the rest. `ails check -f json` and the MCP `validate` reply carry them as `excluded` (`{dirs, files}`). The folders and files skipped by default (such as `node_modules`) are not listed.
 - Settings: `AILS_MODEL_OFFLINE`, `AILS_NO_PROMO` and the other on/off environment variables are on for any value except `0`, `false`, `no` or `off`, so `AILS_MODEL_OFFLINE=off` now leaves the model download on.

@@ -25,7 +25,6 @@ from reporails_cli.core.lint.regex.runner import (
     _file_matches_path_filter,
     _is_text_file,
     _resolve_scan_targets,
-    _resolve_scanned_files,
     _scan_all_targets,
     _scan_combined,
     checks_per_file,
@@ -163,7 +162,7 @@ def test_scan_emits_all_matches_by_default(tmp_path: Path) -> None:
     f = tmp_path / "CLAUDE.md"
     f.write_text("alpha beta", encoding="utf-8")
 
-    sarif = _scan_all_targets([f], tmp_path, [check], {}, frozenset())
+    sarif = _scan_all_targets([f], tmp_path, [check], {})
     results = sarif["runs"][0]["results"]
     assert sum(1 for r in results if r["ruleId"] == "M1") == 2
 
@@ -215,24 +214,6 @@ def test_compiled_check_ignores_nonpositive_min_lines(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # _resolve_scanned_files exclusion combination (L480)
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-@pytest.mark.subsys_lint
-def test_resolve_scanned_files_excludes_by_dir_alone(tmp_path: Path) -> None:
-    """A file excluded by dir alone is dropped even when file-globs don't match.
-
-    Kills L480 `or->and`: with `and` the dir-exclusion no longer suffices.
-    """
-    nm = tmp_path / "node_modules"
-    nm.mkdir()
-    f = nm / "CLAUDE.md"
-    f.write_text("x", encoding="utf-8")
-
-    scanned = _resolve_scanned_files(
-        tmp_path, instruction_files=[f], exclude_dirs=frozenset({"node_modules"}), exclude_files=None
-    )
-    assert scanned == []
 
 
 # ---------------------------------------------------------------------------

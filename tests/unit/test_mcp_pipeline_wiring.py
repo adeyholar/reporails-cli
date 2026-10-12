@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from reporails_cli.core.platform.runtime.merger import CombinedResult
 from reporails_cli.interfaces.mcp import tools, validate_targets
 
 pytestmark = [pytest.mark.unit, pytest.mark.subsys_server]
@@ -50,7 +51,7 @@ def test_run_pipeline_scopes_a_single_file_target(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "reporails_cli.interfaces.mcp.tools._discover_files",
-        lambda _target, single_file=None: ([], "claude", [single_file], {}, ((), ()), None),
+        lambda _target, single_file=None, named=frozenset(): ([], "claude", [single_file], {}, ((), ()), None),
     )
     monkeypatch.setattr("reporails_cli.interfaces.mcp.tools._build_map", lambda *_a, **_k: (None, None))
     monkeypatch.setattr(
@@ -59,7 +60,7 @@ def test_run_pipeline_scopes_a_single_file_target(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "reporails_cli.interfaces.mcp.tools._assemble_mcp_result",
-        lambda *_a, **_k: (SimpleNamespace(hooks=()), None),
+        lambda *_a, **_k: (CombinedResult(), None),
     )
     monkeypatch.setattr("reporails_cli.formatters.json.format_combined_result", lambda *_a, **_k: {"files": {}})
 
@@ -77,7 +78,7 @@ def test_run_pipeline_does_not_scope_a_directory_target(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "reporails_cli.interfaces.mcp.tools._discover_files",
-        lambda _target, single_file=None: ([], "claude", [claude_md], {}, ((), ()), None),
+        lambda _target, single_file=None, named=frozenset(): ([], "claude", [claude_md], {}, ((), ()), None),
     )
     monkeypatch.setattr("reporails_cli.interfaces.mcp.tools._build_map", lambda *_a, **_k: (None, None))
     monkeypatch.setattr(
@@ -86,7 +87,7 @@ def test_run_pipeline_does_not_scope_a_directory_target(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "reporails_cli.interfaces.mcp.tools._assemble_mcp_result",
-        lambda *_a, **_k: (SimpleNamespace(hooks=()), None),
+        lambda *_a, **_k: (CombinedResult(), None),
     )
     monkeypatch.setattr("reporails_cli.formatters.json.format_combined_result", lambda *_a, **_k: {"files": {}})
 

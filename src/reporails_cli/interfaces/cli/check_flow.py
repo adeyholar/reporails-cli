@@ -36,10 +36,12 @@ from reporails_cli.interfaces.cli.check_notices import (
     _notify_heal_scope_skips,
 )
 from reporails_cli.interfaces.cli.check_orchestration import (
+    HealScope,
     _dispatch_output,
     _emit_stage_timing,
     _file_under_target,
     _narrow_to_path_targets,
+    _put_back_named,
     _quiet_mapper_logs,
     _resolve_capability_paths,
     _resolved_within_target,
@@ -280,10 +282,13 @@ def _narrow_upfront(state: CheckState) -> bool:
             state.targets.capability_specs,
             state.scope.effective_agent,
             state.inputs.project_root,
-            tuple(state.scope.exclusions.dirs),
+            state.scope.exclusions,
         )
         state.scope.upfront_paths |= cap_paths
         _warn_unresolved_skills(unresolved_skills, state.inputs.project_root)
+    named = cap_paths | {t for t in state.targets.path_targets if t.is_file()}
+    if named:
+        _put_back_named(state, named)
     if state.targets.path_targets:
         state.scope.upfront_paths |= set(
             _narrow_to_path_targets(state.scope.instruction_files, state.targets.path_targets)
@@ -389,7 +394,11 @@ def _flow_pipeline(state: CheckState) -> None:
         skills = skill_membership(state.pipeline.ruleset_map)
         with not_evaluated_scope() as unfinished:
             state.pipeline.m_findings = run_m_probes_over_pairs(
-                state.targets.target, pairs, scoped=state.scope.is_targeted, skills=skills
+                state.targets.target,
+                pairs,
+                scoped=state.scope.is_targeted,
+                skills=skills,
+                exclusions=state.scope.exclusions,
             )
         state.pipeline.not_evaluated = tuple(unfinished)
         state.pipeline.stage_timer.mark("m_probe")
@@ -420,7 +429,7 @@ def _run_content_checks(state: CheckState) -> None:
         finding
         for agent_id, files in _agent_file_pairs(state)
         for finding in run_content_quality_checks(
-            state.pipeline.ruleset_map, state.targets.target, files, agent=agent_id
+            state.pipeline.ruleset_map, state.targets.target, files, agent=agent_id, exclusions=state.scope.exclusions
         )
     ]
     state.pipeline.client_findings = run_client_checks(state.pipeline.ruleset_map)
@@ -476,7 +485,8 @@ def _flow_assemble(state: CheckState) -> None:
     from reporails_cli.formatters.text.display import filter_result_to_paths, filter_ruleset_map_to_paths
 
     state.render.result = with_exclusions(
-        assemble_result(_assemble_inputs(state, state.pipeline.lint_result)), state.render.excluded
+        assemble_result(_assemble_inputs(state, state.pipeline.lint_result), state.scope.exclusions),
+        state.render.excluded,
     )
     # `assemble_result` unpacks the lint result (report/hints/cross_file_coordinates/tier)
     # and attaches the composable remediation `workflow` itself; the path filter below
@@ -556,9 +566,8 @@ def _flow_heal(state: CheckState) -> None:
     _notify_heal_scope_skips(len(candidate) - len(heal_files), state.targets.output_format)
     _run_heal_pass(
         state.targets.target,
-        heal_files,
+        HealScope(heal_files, state.scope.effective_agent, state.scope.exclusions),
         state.pipeline.ruleset_map,
-        state.scope.effective_agent,
         state.inputs.dry_run,
         state.targets.output_format,
         state.render.result.notices,

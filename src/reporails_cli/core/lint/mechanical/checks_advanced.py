@@ -363,7 +363,7 @@ def skill_entrypoint_present(
 def frontmatter_valid_glob(
     root: Path,
     args: dict[str, Any],
-    _classified_files: list[ClassifiedFile],
+    classified_files: list[ClassifiedFile],
 ) -> CheckResult:
     """Check that YAML frontmatter path entries use valid glob syntax.
 
@@ -371,7 +371,8 @@ def frontmatter_valid_glob(
     matches at least one file in the project root. Walks the target
     directory recursively so nested rule files (e.g. a subfolder under
     `.cursor/rules/`) are covered, and accepts `.mdc` alongside `.md` —
-    Cursor's own path-scoped rule extension.
+    Cursor's own path-scoped rule extension. When the run classified files, only the rule
+    files among them are checked, so a rule file the run left out gets no finding.
     """
     path = str(args.get("path", ""))
     require_matches = args.get("require_matches", False)
@@ -381,8 +382,11 @@ def frontmatter_valid_glob(
         return CheckResult(passed=True, message=f"Directory not found: {path} (OK)")
     unresolved: list[tuple[str, str]] = []
     exclude_dirs = load_project_exclude_dirs(root)
-    rule_files = walk_files(target, exclude_dirs, lambda f: f.suffix in (".md", ".mdc"))
-    for f in sorted(rule_files):
+    subjects = list(walk_files(target, exclude_dirs, lambda f: f.suffix in (".md", ".mdc")))
+    if classified_files:
+        checked = {safe_resolve(cf.path) for cf in classified_files}
+        subjects = [f for f in subjects if safe_resolve(f) in checked]
+    for f in sorted(subjects):
         result = _validate_file_globs(f, root, require_matches, lenient, unresolved, exclude_dirs)
         if result is not None:
             return result

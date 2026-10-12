@@ -31,6 +31,7 @@ from reporails_cli.core.discovery.agents import (
     get_all_instruction_files,
     get_known_agents,
 )
+from reporails_cli.core.discovery.exclusions import RunExclusions, load_run_exclusions
 from reporails_cli.core.discovery.walk import is_symlink_loop_error, is_under, safe_resolve
 from reporails_cli.core.mapper.classify import CONSTRAINT_WORDS
 from reporails_cli.core.mapper.imports import import_refs
@@ -113,7 +114,9 @@ def _detect_path_scoped_rules(
     return False
 
 
-def detect_features_filesystem(target: Path, agents: list[DetectedAgent] | None = None) -> DetectedFeatures:
+def detect_features_filesystem(
+    target: Path, agents: list[DetectedAgent] | None = None, exclusions: RunExclusions | None = None
+) -> DetectedFeatures:
     """Detect project features from file structure and content.
 
     Populates DetectedFeatures for capability-gate level detection,
@@ -122,6 +125,7 @@ def detect_features_filesystem(target: Path, agents: list[DetectedAgent] | None 
     Args:
         target: Project root path
         agents: Pre-detected agents (avoids redundant filesystem scan)
+        exclusions: The run's exclusions; a folder it leaves out is not searched (default: the project's config)
 
     Returns:
         DetectedFeatures with all capability fields populated
@@ -135,7 +139,7 @@ def detect_features_filesystem(target: Path, agents: list[DetectedAgent] | None 
     # gates on its own declared surfaces.
     resolved_agents = agents if agents is not None else detect_agents(target)
     agent_ids = {a.agent_type.id for a in resolved_agents}
-    scan = _SurfaceScan.for_target(target)
+    scan = _SurfaceScan.for_target(target, exclusions)
 
     # Check for CLAUDE.md at root
     root_claude = target / "CLAUDE.md"
@@ -239,10 +243,8 @@ class _SurfaceScan:
         return self.hook_configs[path]
 
     @classmethod
-    def for_target(cls, target: Path) -> _SurfaceScan:
-        from reporails_cli.core.discovery.agents import load_project_exclude_dirs
-
-        return cls(exclude_dirs=load_project_exclude_dirs(target))
+    def for_target(cls, target: Path, exclusions: RunExclusions | None = None) -> _SurfaceScan:
+        return cls(exclude_dirs=(exclusions or load_run_exclusions(target)).walk_dirs)
 
 
 def _scan_for(target: Path, scan: _SurfaceScan | None) -> _SurfaceScan:

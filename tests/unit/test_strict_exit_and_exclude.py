@@ -93,51 +93,18 @@ class TestStrictExitOnRejectedKey:
 class TestExcludeFilesDropsLinkWalked:
     @pytest.mark.unit
     @pytest.mark.subsys_lint
-    def test_drop_excluded_filters_classified(self, tmp_path: Path) -> None:
-        """Regression: the @import link-walk re-discovered files agent discovery already
-        excluded. `_drop_excluded` re-applies exclude_files to the classified set."""
-        from reporails_cli.core.lint.rule_runner import _drop_excluded
+    def test_link_walked_left_out_file_is_not_classified(self, tmp_path: Path) -> None:
+        """The @import link walk does not reach a file the run left out."""
+        from reporails_cli.core.discovery.exclusions import RunExclusions
+        from reporails_cli.core.lint.rule_runner import _classify_agent_files
 
-        @dataclass
-        class _CF:
-            path: Path
+        (tmp_path / "CLAUDE.md").write_text("# P\n\n@VENDORED.md\n\n@other.md\n", encoding="utf-8")
+        (tmp_path / "VENDORED.md").write_text("Always lint.\n", encoding="utf-8")
+        (tmp_path / "other.md").write_text("Always test.\n", encoding="utf-8")
+        (tmp_path / ".ails").mkdir()
+        (tmp_path / ".ails" / "config.yml").write_text("generic_scanning: true\n", encoding="utf-8")
+        exclusions = RunExclusions(tmp_path, files=("VENDORED.md",))
 
-        keep = _CF(path=tmp_path / "CLAUDE.md")
-        drop = _CF(path=tmp_path / "VENDORED.md")
-
-        out = _drop_excluded([keep, drop], ["VENDORED.md"], tmp_path)
-
-        assert keep in out
-        assert drop not in out
-
-    @pytest.mark.unit
-    @pytest.mark.subsys_lint
-    def test_drop_excluded_noop_without_patterns(self, tmp_path: Path) -> None:
-        from reporails_cli.core.lint.rule_runner import _drop_excluded
-
-        @dataclass
-        class _CF:
-            path: Path
-
-        items = [_CF(path=tmp_path / "a.md")]
-        assert _drop_excluded(items, None, tmp_path) == items
-
-    @pytest.mark.unit
-    @pytest.mark.subsys_lint
-    def test_drop_excluded_keeps_explicitly_targeted_file(self, tmp_path: Path) -> None:
-        """An explicitly-targeted file matching an exclude glob is NOT dropped — naming a
-        file overrides the project exclusion. Regression: filtering the full classified
-        set returned a falsely-clean empty result for a file the user asked to validate."""
-        from reporails_cli.core.lint.rule_runner import _drop_excluded
-
-        @dataclass
-        class _CF:
-            path: Path
-
-        explicit = _CF(path=tmp_path / "VENDORED.md")
-        walked = _CF(path=tmp_path / "other_VENDORED.md")
-
-        out = _drop_excluded([explicit, walked], ["*VENDORED.md"], tmp_path, keep=[explicit.path])
-
-        assert explicit in out, "explicitly-targeted file was wrongly excluded"
-        assert walked not in out, "link-walked excluded file should still be dropped"
+        classified, _ = _classify_agent_files(tmp_path, [tmp_path / "CLAUDE.md"], "claude", exclusions=exclusions)
+        names = {cf.path.name for cf in classified}
+        assert names == {"CLAUDE.md", "other.md"}

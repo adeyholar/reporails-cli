@@ -14,7 +14,7 @@ from reporails_cli.core.discovery.walk import safe_resolve
 
 
 def _resolve_one_target(
-    token: str, token_agent: str, scan_root: Path, effective_agent: str, exclude_dirs: Any
+    token: str, token_agent: str, scan_root: Path, effective_agent: str, exclusions: Any
 ) -> tuple[set[Path], set[Path]] | dict[str, Any]:
     """One target `token` resolved to the `(files, dirs)` it contributes, or a
     `target_not_found` error payload."""
@@ -24,7 +24,7 @@ def _resolve_one_target(
     if kind == "capability" and isinstance(target, tuple):
         capability, name = target
         try:
-            paths, _unresolved = resolve_capability_spec(capability, name, effective_agent, scan_root, exclude_dirs)
+            paths, _unresolved = resolve_capability_spec(capability, name, effective_agent, scan_root, exclusions)
         except TargetError as err:
             return {"error": "target_not_found", "message": err.message()}
         return {safe_resolve(p) for p in paths}, set()
@@ -43,23 +43,27 @@ def resolve_validate_targets(tokens: tuple[str, ...], scan_root: Path) -> tuple[
     `(files, dirs)` — every path resolved — or a `target_not_found` error payload."""
     from reporails_cli.core.classify.capability_paths import sniff_agent
     from reporails_cli.core.discovery.agents import detect_agents
+    from reporails_cli.core.discovery.exclusions import load_run_exclusions
     from reporails_cli.core.pipeline.mapping import resolve_agent_filters
     from reporails_cli.core.platform.config.config import get_project_config
 
-    config = get_project_config(scan_root)
+    exclusions = load_run_exclusions(scan_root)
     effective_agent, _, _, _ = resolve_agent_filters(
-        config.default_agent, detect_agents(scan_root), scan_root, config.exclude_dirs, config.exclude_files
+        get_project_config(scan_root).default_agent,
+        detect_agents(scan_root),
+        scan_root,
+        list(exclusions.dirs),
+        list(exclusions.files),
     )
     token_agent = sniff_agent("", scan_root)
     files: set[Path] = set()
     dirs: set[Path] = set()
     for token in tokens:
-        result = _resolve_one_target(token, token_agent, scan_root, effective_agent, config.exclude_dirs)
+        result = _resolve_one_target(token, token_agent, scan_root, effective_agent, exclusions)
         if isinstance(result, dict):
             return result
-        new_files, new_dirs = result
-        files |= new_files
-        dirs |= new_dirs
+        files |= result[0]
+        dirs |= result[1]
     return files, dirs
 
 

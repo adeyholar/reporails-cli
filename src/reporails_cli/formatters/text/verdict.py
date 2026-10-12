@@ -111,7 +111,12 @@ def _render_excluded_line(result: Any, *, scored: bool) -> None:
     from rich.markup import escape
     from rich.table import Table
 
-    phrase = excluded_phrase(getattr(result, "excluded_dirs", ()), getattr(result, "excluded_files", ()), scored=scored)
+    phrase = excluded_phrase(
+        getattr(result, "excluded_dirs", ()),
+        getattr(result, "excluded_files", ()),
+        scored=scored,
+        imported_counted=getattr(result, "excluded_imported", False),
+    )
     if phrase:
         # Two columns, so a long list wraps under its own value rather than back to the margin.
         grid = Table.grid()

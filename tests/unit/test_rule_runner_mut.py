@@ -291,7 +291,9 @@ def test_run_m_probes_config_error_defaults_generic_off(tmp_path: Path, monkeypa
     def raise_cfg(_pd: Path) -> object:
         raise ValueError("boom")
 
-    def fake_classify(pd: Path, files: list, ft: object, generic_scanning: bool, skills: object = None) -> list:
+    def fake_classify(
+        pd: Path, files: list, ft: object, generic_scanning: bool, skills: object = None, exclusions: object = None
+    ) -> list:
         captured["gs"] = generic_scanning
         return []
 
@@ -349,7 +351,9 @@ def test_content_quality_config_error_defaults_generic_off(tmp_path: Path, monke
     def raise_cfg(_pd: Path) -> object:
         raise ValueError("boom")
 
-    def fake_classify(pd: Path, files: list, ft: object, generic_scanning: bool, skills: object = None) -> list:
+    def fake_classify(
+        pd: Path, files: list, ft: object, generic_scanning: bool, skills: object = None, exclusions: object = None
+    ) -> list:
         captured["gs"] = generic_scanning
         return []
 

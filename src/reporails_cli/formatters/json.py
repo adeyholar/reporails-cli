@@ -516,7 +516,11 @@ def format_combined_result(
         "tier": result.tier,
         "notices": format_notices(result.notices),
         "not_evaluated": [{"rule": rule, "file": file} for rule, file in result.not_evaluated],
-        "excluded": {"dirs": list(result.excluded_dirs), "files": list(result.excluded_files)},
+        "excluded": {
+            "dirs": list(result.excluded_dirs),
+            "files": list(result.excluded_files),
+            "imported_text_counted": result.excluded_imported,
+        },
         "quality": (
             float(result.quality.display_score)
             if result.quality is not None and result.quality.display_score is not None

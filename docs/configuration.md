@@ -174,7 +174,9 @@ ails check --exclude-dirs examples --exclude-dirs third_party
 
 A project over the atom cap gets a ready `--exclude-dirs` command with its refusal: it names the densest folders and the folders to leave out so the rest is checked and scored. Excluded folders are not checked.
 
-Whenever you leave folders or files out — with `--exclude-dirs`, `--exclude-files` or the `exclude_dirs` / `exclude_files` settings — the summary names them on an `Excluded` line under the score, because the score then covers only the rest of the project. The built-in excludes above are not listed.
+Whenever you leave folders or files out — with `--exclude-dirs`, `--exclude-files` or the `exclude_dirs` / `exclude_files` settings — the summary names them on an `Excluded` line under the score, because the score then covers only the rest of the project. The built-in excludes above are not listed. Flags add to the settings: `--exclude-dirs` joins `exclude_dirs` and `--exclude-files` joins `exclude_files`; neither replaces the other.
+
+Text that a checked file pulls in with `@path` from a file you left out still counts inside the file that imports it, and the `Excluded` line then ends with `; imported text in checked files still counts`. With `generic_scanning: true`, a left-out file is not checked through an `@` import or a link either. A capability folder you leave out (such as `.claude/skills/`) is not counted as present, so it does not raise your level.
 
 ## Excluding individual files
 
@@ -200,7 +202,7 @@ For one-off runs, pass `--exclude-files`:
 ails check --exclude-files ".claude/skills/**/*" --exclude-files ".claude/agents/reviewer.md"
 ```
 
-Explicitly targeting an excluded file still scans it — `ails check ./.claude/agents/reviewer.md` overrides the exclusion, since exclusion only applies to discovery.
+Explicitly targeting an excluded file still scans it — `ails check ./.claude/agents/reviewer.md` overrides the exclusion, since exclusion only applies to discovery. A file or capability you name on the command line is checked even inside a left-out folder, and it is no longer listed under `Excluded`.
 
 ## Keeping heal off a file
 

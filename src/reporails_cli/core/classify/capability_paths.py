@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from reporails_cli.core.classify import load_file_types
 from reporails_cli.core.discovery.agent_discovery import _is_external_pattern
@@ -24,6 +24,9 @@ from reporails_cli.core.discovery.walk import safe_resolve, walk_glob_matches
 from reporails_cli.core.platform.config.vocabulary import load_capability_vocabulary
 from reporails_cli.core.platform.dto.models import FileTypeDeclaration
 from reporails_cli.core.platform.utils.utils import is_loose_leaf_pattern
+
+if TYPE_CHECKING:
+    from reporails_cli.core.discovery.exclusions import RunExclusions
 
 
 def available_capabilities(agent: str, project_root: Path | None = None) -> list[str]:
@@ -178,11 +181,12 @@ def resolve_capability_spec(
     name: str,
     agent: str,
     project_root: Path,
-    exclude_dirs: list[str] | tuple[str, ...] | None = None,
+    exclusions: RunExclusions | None = None,
 ) -> tuple[set[Path], list[Any]]:
     """Resolve one (capability, name) spec to its file set + the skills an agent preloads that
-    did not resolve. An empty `name` targets every instance; a named subagent brings the skills
-    it preloads. Raises `TargetError` when the spec names no file."""
+    did not resolve. An empty `name` targets every instance the run's `exclusions` keep; a named
+    instance resolves whatever is excluded, and a named subagent brings the skills it preloads
+    that the exclusions keep. Raises `TargetError` when the spec names no file."""
     from reporails_cli.core.classify.focus_expansion import expand_focus
 
     if not capability_declared(capability, agent, project_root):
@@ -190,15 +194,15 @@ def resolve_capability_spec(
             "undeclared", capability, agent, project_root, name, tuple(available_capabilities(agent, project_root))
         )
     if not name:
-        return set(list_capability_targets(agent, capability, project_root, exclude_dirs)), []
+        return set(list_capability_targets(agent, capability, project_root, exclusions)), []
     resolved = resolve_capability(agent, capability, name, project_root)
     if resolved is None:
-        available = list_capability_targets(agent, capability, project_root, exclude_dirs)
+        available = list_capability_targets(agent, capability, project_root, exclusions)
         raise TargetError("unnamed", capability, agent, project_root, name, tuple(str(p) for p in available))
     paths = {resolved}
     unresolved: list[Any] = []
     if capability == "agents":
-        paths, unresolved = expand_focus(paths, agent, project_root)
+        paths, unresolved = expand_focus(paths, agent, project_root, exclusions)
     return paths, unresolved
 
 
@@ -219,13 +223,13 @@ def list_capability_targets(
     agent: str,
     capability: str,
     project_root: Path,
-    exclude_dirs: list[str] | tuple[str, ...] | None = None,
+    exclusions: RunExclusions | None = None,
 ) -> list[Path]:
     """Enumerate files matching `capability` for `agent` under `project_root`.
 
     Globs the project-scope patterns from the agent's ``file_types:``
-    declaration, honoring `.ails/config.yml: exclude_dirs` via
-    `exclude_dirs`. Returns absolute paths. Returns an empty list when
+    declaration, leaving out what `exclusions` leaves out (`None` reads the
+    project's config). Returns absolute paths. Returns an empty list when
     the agent has no `capability` declared.
 
     Fold-source aliases (``main``, ``memories``, ``memory``) union the
@@ -234,8 +238,12 @@ def list_capability_targets(
     `memory_locator.memory_entries_for_agent` so user-scope entries
     surface in the listing.
     """
+    if exclusions is None:
+        from reporails_cli.core.discovery.exclusions import load_run_exclusions
+
+        exclusions = load_run_exclusions(project_root)
     if capability == "referenced":
-        return _list_referenced_targets(agent, project_root)
+        return _list_referenced_targets(agent, project_root, exclusions)
 
     out: list[Path] = []
     seen: set[Path] = set()
@@ -246,7 +254,8 @@ def list_capability_targets(
         if _is_user_scope_memory(ft_name, decl.patterns):
             paths = _user_scope_memory_paths(agent, project_root)
         else:
-            paths = _glob_patterns(decl.patterns, project_root, frozenset(exclude_dirs or ()), decl=decl)
+            paths = _glob_patterns(decl.patterns, project_root, exclusions.walk_dirs, decl=decl)
+            paths = [p for p in paths if not exclusions.leaves_out(p)]
             # A file the agent reads only under a condition is its target only then.
             paths = apply_read_gate(agent, ft_name, paths, project_root)
         for path in paths:
@@ -258,7 +267,7 @@ def list_capability_targets(
     return out
 
 
-def _list_referenced_targets(agent: str, project_root: Path) -> list[Path]:
+def _list_referenced_targets(agent: str, project_root: Path, exclusions: RunExclusions) -> list[Path]:
     """Enumerate `[text](path)`-reached files via classifier output.
 
     Runs link-walker discovery (`generic_scanning: true`) against the
@@ -270,16 +279,17 @@ def _list_referenced_targets(agent: str, project_root: Path) -> list[Path]:
     from reporails_cli.core.classify import classify_files, load_file_types
     from reporails_cli.core.discovery.agent_discovery import discover_from_config
 
-    discovered = discover_from_config(project_root, agent)
+    discovered = discover_from_config(project_root, agent, extra_exclude_dirs=exclusions.walk_dirs)
     if discovered is None:
         return []
-    instruction_files, _rule_files, _config_files = discovered
+    instruction_files = [f for f in discovered[0] if not exclusions.leaves_out(f)]
     file_types = load_file_types(agent, project_root=project_root)
     classified = classify_files(
         project_root,
         instruction_files,
         file_types,
         generic_scanning=True,
+        exclusions=exclusions,
     )
     return [cf.path for cf in classified if cf.file_type == "referenced"]
 
@@ -319,7 +329,7 @@ def resolve_capability(
     capability: str,
     name: str,
     project_root: Path,
-    exclude_dirs: list[str] | tuple[str, ...] | None = None,
+    exclusions: RunExclusions | None = None,
 ) -> Path | None:
     """Resolve `(agent, capability, name)` to a canonical file path.
 
@@ -334,9 +344,14 @@ def resolve_capability(
     - `main` / `override`: filename match against `name` (rarely used
       with an explicit name).
 
-    Returns the first match, or None when no candidate matches.
+    A named instance resolves whatever is excluded: `exclusions` is the set to resolve under, and
+    `None` means no user exclusions. Returns the first match, or None when no candidate matches.
     """
-    candidates = list_capability_targets(agent, capability, project_root, exclude_dirs)
+    from reporails_cli.core.discovery.exclusions import RunExclusions
+
+    candidates = list_capability_targets(
+        agent, capability, project_root, exclusions if exclusions is not None else RunExclusions.none(project_root)
+    )
     extractor = _name_extractor_for(capability)
     for candidate in candidates:
         if extractor(candidate) == name:
@@ -358,7 +373,7 @@ def _find_declaration(
 def _glob_patterns(
     patterns: tuple[str, ...],
     project_root: Path,
-    exclude_dirs: frozenset[str] = frozenset(),
+    skip_dirs: frozenset[str],
     decl: FileTypeDeclaration | None = None,
 ) -> list[Path]:
     """Expand glob patterns under project_root. Skips user/managed-scope patterns.
@@ -369,7 +384,7 @@ def _glob_patterns(
     the project tree — drop patterns that start with `~/`, an absolute
     path outside `project_root`, or `/etc/`-style managed locations.
 
-    `exclude_dirs` mirrors `.ails/config.yml: exclude_dirs` — any matched
+    `skip_dirs` is the run's walk-pruned folder names — any matched
     path whose ancestor-chain (relative to project_root) contains a
     directory name in the set is filtered out so listing-mode matches
     full-project discovery.
@@ -387,9 +402,6 @@ def _glob_patterns(
     elsewhere. Duplicate physical files (same inode reached via multiple
     symlinks) are deduped via the resolved path.
     """
-    from reporails_cli.core.discovery.agents import load_project_exclude_dirs
-
-    skip_dirs = load_project_exclude_dirs(project_root) | exclude_dirs
     # A plugin component pattern resolves against each plugin root under the project.
     expanded = [
         pattern

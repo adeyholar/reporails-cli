@@ -116,7 +116,10 @@ def _status_lines(payload: dict[str, Any]) -> list[str]:
 def _excluded_lines(payload: dict[str, Any]) -> list[str]:
     excluded = _as_dict(payload.get("excluded"))
     phrase = excluded_phrase(
-        excluded.get("dirs") or (), excluded.get("files") or (), scored=payload.get("quality") is not None
+        excluded.get("dirs") or (),
+        excluded.get("files") or (),
+        scored=payload.get("quality") is not None,
+        imported_counted=bool(excluded.get("imported_text_counted")),
     )
     return [f"excluded: {phrase}"] if phrase else []
 
