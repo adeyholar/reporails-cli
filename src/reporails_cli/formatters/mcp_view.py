@@ -15,6 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from reporails_cli.formatters.text.display_constants import excluded_phrase
 from reporails_cli.formatters.text.not_evaluated import group_not_evaluated, not_evaluated_sentence
 
 # The `workflow.locations` block (header plus rows) stays under this many characters.
@@ -59,6 +60,7 @@ def render_text_view(payload: dict[str, Any]) -> str:
     rules = _as_dict(payload.get("rules"))
     sections = (
         _status_lines(payload),
+        _excluded_lines(payload),
         _compression_lines(payload),
         _offline_lines(payload),
         _notice_lines(payload),
@@ -109,6 +111,14 @@ def _status_lines(payload: dict[str, Any]) -> list[str]:
     )
     line = _dot(*parts)
     return [f"validate: {line}"] if line else []
+
+
+def _excluded_lines(payload: dict[str, Any]) -> list[str]:
+    excluded = _as_dict(payload.get("excluded"))
+    phrase = excluded_phrase(
+        excluded.get("dirs") or (), excluded.get("files") or (), scored=payload.get("quality") is not None
+    )
+    return [f"excluded: {phrase}"] if phrase else []
 
 
 def _compression_lines(payload: dict[str, Any]) -> list[str]:

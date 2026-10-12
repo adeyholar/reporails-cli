@@ -125,6 +125,12 @@ def assemble_result(inp: AssembleInputs) -> Any:
     return replace(result, stats=replace(result.stats, agents=_rule_agents(inp)))
 
 
+def with_exclusions(result: Any, exclusions: tuple[tuple[str, ...], tuple[str, ...]]) -> Any:
+    """`result` stating the `(folders, file globs)` the run left out."""
+    dirs, files = exclusions
+    return replace(result, excluded_dirs=dirs, excluded_files=files)
+
+
 def _relative_pairs(pairs: tuple[tuple[str, str], ...], scan_root: Path) -> tuple[tuple[str, str], ...]:
     """`pairs` with each file given project-relative, as findings are; repeats dropped, order kept."""
     from reporails_cli.core.platform.runtime.merger import normalize_finding_path

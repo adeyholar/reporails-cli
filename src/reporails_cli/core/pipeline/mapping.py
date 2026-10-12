@@ -29,6 +29,8 @@ class ScopeDiscovery(NamedTuple):
     mixed: bool
     filtered: list[Any]
     files: list[Path]
+    # The `(folders, file globs)` this pass left out because the user set them; empty when it listed no files.
+    excluded: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
 
 
 def discover_scope(
@@ -54,7 +56,31 @@ def discover_scope(
             agent, detected, target, exclude_dirs, exclude_files
         )
         files = get_all_scannable_files(target, agents=filtered) if scan_files else []
-    return ScopeDiscovery(detected, effective, assumed, mixed, filtered, files)
+    return ScopeDiscovery(
+        detected,
+        effective,
+        assumed,
+        mixed,
+        filtered,
+        files,
+        _applied_exclusions(target, exclude_dirs, exclude_files, scan_files),
+    )
+
+
+def _applied_exclusions(
+    target: Path, exclude_dirs: list[str] | None, exclude_files: list[str] | None, scan_files: bool
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The user's folders and file globs a scan of `target` leaves out, each sorted and free of repeats.
+
+    Folders are the ones passed plus the project config's, which discovery always applies; file globs
+    are the ones passed. A pass that lists no files left nothing out.
+    """
+    if not scan_files:
+        return (), ()
+    from reporails_cli.core.platform.config.config import get_project_config
+
+    dirs = {*(exclude_dirs or ()), *get_project_config(target).exclude_dirs}
+    return tuple(sorted(dirs)), tuple(sorted(set(exclude_files or ())))
 
 
 def resolve_agent_filters(

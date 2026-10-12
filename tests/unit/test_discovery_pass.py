@@ -97,3 +97,41 @@ def test_mcp_discovery_reads_each_directory_once(tmp_path: Path, walker_scans: l
     assert {p.name for p in discovered[2]} >= {"CLAUDE.md", "SKILL.md"}
     assert walker_scans
     assert len(walker_scans) == len(set(walker_scans))
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_lint
+def test_discover_scope_records_flag_and_config_exclusions_once(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    (project / ".ails").mkdir()
+    (project / ".ails" / "config.yml").write_text("exclude_dirs: [vendor, docs]\n", encoding="utf-8")
+    clear_agent_cache()
+    found = discover_scope(project, "", ["docs", "agents"], ["b.md", "a.md", "b.md"])
+    assert found.excluded == (("agents", "docs", "vendor"), ("a.md", "b.md"))
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_lint
+def test_a_single_file_pass_records_no_exclusions(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    (project / ".ails").mkdir()
+    (project / ".ails" / "config.yml").write_text("exclude_dirs: [vendor]\n", encoding="utf-8")
+    clear_agent_cache()
+    assert discover_scope(project, "", ["docs"], ["a.md"], scan_files=False).excluded == ((), ())
+    found = tools._discover_files(project, single_file=project / "CLAUDE.md")
+    assert isinstance(found, tuple)
+    assert found[4] == ((), ())
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_lint
+def test_mcp_discovery_that_excludes_everything_still_names_the_exclusions(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    (project / ".ails").mkdir()
+    (project / ".ails" / "config.yml").write_text(
+        "exclude_dirs: [pkg, .claude]\nexclude_files: [CLAUDE.md, AGENTS.md]\n", encoding="utf-8"
+    )
+    clear_agent_cache()
+    payload = tools._discover_files(project)
+    assert isinstance(payload, dict)
+    assert payload["excluded"] == {"dirs": [".claude", "pkg"], "files": ["AGENTS.md", "CLAUDE.md"]}

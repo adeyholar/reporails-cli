@@ -13,7 +13,12 @@ from typing import Any
 from rich.console import Console
 
 from reporails_cli.core.platform.dto.models import SEVERITY_ORDER, Severity
-from reporails_cli.formatters.text.display_constants import conventions_phrase, counted, get_term_width
+from reporails_cli.formatters.text.display_constants import (
+    conventions_phrase,
+    counted,
+    excluded_phrase,
+    get_term_width,
+)
 from reporails_cli.formatters.text.funnel_cta import no_score_reason
 from reporails_cli.formatters.text.rule_meta import display_rule_id, rule_docs_url, rule_severity
 from reporails_cli.formatters.text.score import score_color
@@ -91,6 +96,7 @@ def _render_verdict_block(
     else:
         reason = no_score_reason(getattr(result, "server_error", None))
         console.print(f"  {'Quality':<{_VERDICT_LABEL_W}}[dim]n/a ({reason})[/dim]{elapsed_s}")
+    _render_excluded_line(result, scored=score is not None)
 
     findings = list(result.findings or [])
     visible_errors = [f for f in findings if f.severity == "error"]
@@ -98,6 +104,21 @@ def _render_verdict_block(
     _render_fix_now(visible_errors, hint_errors)
     listed, conventions = split_conventions(findings, verbose)
     _render_findings_line(len(listed), verbose, len(conventions))
+
+
+def _render_excluded_line(result: Any, *, scored: bool) -> None:
+    """The folders and files the user left out of the run, under the Quality line; nothing when none were."""
+    from rich.markup import escape
+    from rich.table import Table
+
+    phrase = excluded_phrase(getattr(result, "excluded_dirs", ()), getattr(result, "excluded_files", ()), scored=scored)
+    if phrase:
+        # Two columns, so a long list wraps under its own value rather than back to the margin.
+        grid = Table.grid()
+        grid.add_column(width=2 + _VERDICT_LABEL_W, no_wrap=True)
+        grid.add_column()
+        grid.add_row(f"  {'Excluded':<{_VERDICT_LABEL_W}}", escape(phrase))
+        console.print(grid)
 
 
 # Lower ranks first: the strongest grade a reply put on a rule's errors, then the registry severity.

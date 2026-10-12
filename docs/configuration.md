@@ -173,6 +173,8 @@ ails check --exclude-dirs examples --exclude-dirs third_party
 
 A project over the atom cap gets a ready `--exclude-dirs` command with its refusal: it names the densest folders and the folders to leave out so the rest is checked and scored. Excluded folders are not checked.
 
+Whenever you leave folders or files out — with `--exclude-dirs`, `--exclude-files` or the `exclude_dirs` / `exclude_files` settings — the summary names them on an `Excluded` line under the score, because the score then covers only the rest of the project. The built-in excludes above are not listed.
+
 ## Excluding individual files
 
 `exclude_files` targets *specific files* rather than directory names. Each entry is a glob matched against the file path **relative to the project root**, so you can name an exact file, files one level down, or any file by basename:
@@ -399,6 +401,7 @@ JSON output is one object per run, grouping findings under `files` keyed by path
   "elapsed_ms": 593.5,
   "notices": [],
   "not_evaluated": [],
+  "excluded": {"dirs": [], "files": []},
   "files": {
     "CLAUDE.md": {
       "findings": [
@@ -437,11 +440,13 @@ What differs by tier — measured on the same two-file fixture (one `CLAUDE.md`,
 
 Do not key a "is this a paid run?" check off `pro{}` — it is the *upgrade hint* for unpaid runs and is absent on Pro. Read `tier` (`anonymous` / `free` / `pro`; empty (`""`) when the service gave no reply, as on an offline run) instead; `workflow{}` is the paid-only payload. `workflow.locations[]` orders the project's kinds of files to rewrite (each entry carries `order`, `element`, `kind`, `loading`, `files`, `importance`, and its own `findings[]` with `remedy` text); `workflow.listed[]` names every other firing rule and why it needs no rewrite; there is no `workflow.steps[]`.
 
-Always present, regardless of tier: `offline`, `server_error`, `tier`, `quality`, `level`, `files{}`, `stats`, `top_rules`, `notices`, `not_evaluated`, `elapsed_ms`. `quality` is `null` when no score was computed (an offline run). `server_error` is `null` when the server answered; when the request was rejected, timed out, or failed it carries `{status, error, message, upgrade_url, tier}` — so a designed offline run and a real outage are distinguishable rather than both reading as "no score". `surface_health[]` is added when surfaces are populated; each entry carries `name`, `score`, `file_count`, `finding_count`, and a per-category `category_breakdown` map. An entry's `type` is `repetition` (one instruction repeated nearly verbatim in two files) or `overlap` (one same-topic line pair of two files that can load together). `stats.cross_file_overlaps` counts the overlapping file pairs. `cross_file[]` and `cross_file_coordinates[]` are tier-exclusive (see the table above) and both are absent when the run has no cross-file findings.
+Always present, regardless of tier: `offline`, `server_error`, `tier`, `quality`, `level`, `files{}`, `stats`, `top_rules`, `notices`, `not_evaluated`, `excluded`, `elapsed_ms`. `quality` is `null` when no score was computed (an offline run). `server_error` is `null` when the server answered; when the request was rejected, timed out, or failed it carries `{status, error, message, upgrade_url, tier}` — so a designed offline run and a real outage are distinguishable rather than both reading as "no score". `surface_health[]` is added when surfaces are populated; each entry carries `name`, `score`, `file_count`, `finding_count`, and a per-category `category_breakdown` map. An entry's `type` is `repetition` (one instruction repeated nearly verbatim in two files) or `overlap` (one same-topic line pair of two files that can load together). `stats.cross_file_overlaps` counts the overlapping file pairs. `cross_file[]` and `cross_file_coordinates[]` are tier-exclusive (see the table above) and both are absent when the run has no cross-file findings.
 
 `notices` is a list of short messages about your account, such as a failed payment, Pro ending on a date, Pro having ended, or an announcement. Each entry is `{id, level, text, url}`: `level` is `info` or `warn`, and `url` is `""` when there is no link. The list is `[]` when there are no messages. Text output prints warnings on every run and other messages once a day; `--format json` and the MCP `validate` reply carry all of them. If you build on the JSON, show each notice to the user.
 
 `not_evaluated` lists the checks that did not finish on a file, as `{rule, file}`; it is `[]` when every check finished. A check that runs out of time on a very large file reports no finding for that file rather than a guess, so a rule named here was neither passed nor failed there. Text output names them in one line per file under the results.
+
+`excluded` lists what you left out of the run: `dirs` (from `--exclude-dirs` and `exclude_dirs` together) and `files` (from `--exclude-files` when you pass it, otherwise `exclude_files`). Both are `[]` when you excluded nothing, and the built-in excludes are not listed. When either is non-empty, the score covers only the rest of the project.
 
 Two additive fields enrich the output when the analysis service has data for the run. Both are **additive and backward-compatible** — existing JSON consumers and CI baselines that ignore them keep working unchanged:
 

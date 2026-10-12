@@ -44,6 +44,8 @@ class _Result:
     quality: _Quality | None = None
     hints: tuple = ()
     per_file_analysis: tuple = ()
+    excluded_dirs: tuple = ()
+    excluded_files: tuple = ()
 
 
 def _f(rule: str, severity: str = "warning", tier: str = "", line: int = 1) -> FindingItem:
@@ -278,3 +280,60 @@ class TestFitsTerminal:
         lines = [ln for ln in cap.get().splitlines() if ln.strip()]
         assert all(len(ln) <= width for ln in lines)
         assert len(lines) == (3 if width >= 130 else 5), lines
+
+
+class TestExcludedLine:
+    @pytest.mark.unit
+    @pytest.mark.subsys_cli_ux
+    def test_names_folders_and_globs_under_quality_in_the_label_column(self) -> None:
+        result = _result(_MIXED)
+        result.excluded_dirs = ("agents", "docs")
+        result.excluded_files = ("*.generated.md",)
+        scorecard.console.width = 200
+        try:
+            lines = _verdict(result).splitlines()
+        finally:
+            scorecard.console.width = None
+        assert (
+            lines[1].rstrip() == "  Excluded  agents/, docs/, *.generated.md — not checked; the score covers the rest"
+        )
+        assert lines[0].startswith("  Quality")
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_cli_ux
+    def test_files_only_and_dirs_only(self) -> None:
+        only_files = _result(_MIXED)
+        only_files.excluded_files = ("a.md",)
+        assert "Excluded  a.md — not checked" in _verdict(only_files)
+        only_dirs = _result(_MIXED)
+        only_dirs.excluded_dirs = ("agents",)
+        assert "Excluded  agents/ — not checked" in _verdict(only_dirs)
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_cli_ux
+    def test_unscored_runs_name_them_without_the_score_clause(self) -> None:
+        for quality in (None, _Quality(display_score=None)):
+            result = _result(_MIXED)
+            result.quality = quality
+            result.excluded_dirs = ("agents",)
+            text = _verdict(result)
+            assert "Excluded  agents/ — not checked" in text
+            assert "the score covers the rest" not in text
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_cli_ux
+    def test_absent_when_nothing_was_user_excluded(self) -> None:
+        assert "Excluded" not in _verdict(_result(_MIXED))
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_cli_ux
+    def test_a_long_list_wraps_under_its_value(self) -> None:
+        result = _result(_MIXED)
+        result.excluded_dirs = tuple(f"folder-number-{n}" for n in range(6))
+        scorecard.console.width = 60
+        try:
+            lines = _verdict(result).splitlines()
+        finally:
+            scorecard.console.width = None
+        start = next(i for i, ln in enumerate(lines) if ln.startswith("  Excluded"))
+        assert lines[start + 1].startswith(" " * 12)

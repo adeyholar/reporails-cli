@@ -143,6 +143,8 @@ class CheckRender:
     display_result: Any = None
     display_map: Any = None
     capability_paths: set[Path] = field(default_factory=set)
+    # The `(folders, file globs)` the run left out because the user set them, recorded where scope resolves.
+    excluded: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
     elapsed_ms: float = 0.0
     heal_authed: bool = False
 
@@ -232,7 +234,15 @@ def _resolve_scope_at_target(state: CheckState) -> None:
     )
     if agent_arg:
         _validate_agent(agent_arg, console)
-    found = discover_scope(state.targets.target, agent_arg, state.scope.excl, state.scope.excl_files)
+    # A single file is checked whatever is excluded, so its pass lists nothing and records nothing.
+    found = discover_scope(
+        state.targets.target,
+        agent_arg,
+        state.scope.excl,
+        state.scope.excl_files,
+        scan_files=state.targets.single_file is None,
+    )
+    state.render.excluded = found.excluded
     state.scope.detected = found.detected
     state.scope.effective_agent, state.scope.assumed, state.scope.mixed = (
         found.effective_agent,
@@ -470,10 +480,12 @@ def _flow_assemble(state: CheckState) -> None:
     assemble spine shared with the MCP `validate` tool (`core/pipeline/assemble.py`); the
     display-path filtering below stays CLI-only.
     """
-    from reporails_cli.core.pipeline.assemble import assemble_result
+    from reporails_cli.core.pipeline.assemble import assemble_result, with_exclusions
     from reporails_cli.formatters.text.display import filter_result_to_paths, filter_ruleset_map_to_paths
 
-    state.render.result = assemble_result(_assemble_inputs(state, state.pipeline.lint_result))
+    state.render.result = with_exclusions(
+        assemble_result(_assemble_inputs(state, state.pipeline.lint_result)), state.render.excluded
+    )
     # `assemble_result` unpacks the lint result (report/hints/cross_file_coordinates/tier)
     # and attaches the composable remediation `workflow` itself; the path filter below
     # preserves it via `dataclasses.replace`.

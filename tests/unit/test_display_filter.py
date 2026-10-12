@@ -90,3 +90,14 @@ def test_get_group_atoms_uses_passed_root_not_cwd(tmp_path: Path) -> None:
     atoms = get_group_atoms("main", [("CLAUDE.md", [])], rm, root)
 
     assert len(atoms) == 2, "atoms under the scan root must match the group's files"
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_diagnostic
+def test_filter_result_to_paths_carries_user_exclusions(tmp_path: Path) -> None:
+    from reporails_cli.core.platform.runtime.merger import CombinedResult
+
+    result = CombinedResult(excluded_dirs=("agents",), excluded_files=("*.gen.md",))
+    filtered = filter_result_to_paths(result, set(), tmp_path)
+    assert filtered.excluded_dirs == ("agents",)
+    assert filtered.excluded_files == ("*.gen.md",)

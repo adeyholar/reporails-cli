@@ -97,11 +97,12 @@ def _emit_empty_run(state: CheckState) -> None:
     human message, which says plainly that nothing was found.
     """
     if state.targets.output_format in ("json", "github"):
+        from reporails_cli.core.pipeline.assemble import with_exclusions
         from reporails_cli.core.platform.runtime.merger import CombinedResult
 
         _dispatch_output(
             state.targets.output_format,
-            CombinedResult(),
+            with_exclusions(CombinedResult(), state.render.excluded),
             None,
             0.0,
             set(),

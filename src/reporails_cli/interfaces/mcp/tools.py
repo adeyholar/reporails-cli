@@ -17,6 +17,9 @@ from reporails_cli.formatters.host_hooks import host_hooks_field
 
 logger = logging.getLogger(__name__)
 
+# The `(folders, file globs)` a run left out because the user set them.
+Excluded = tuple[tuple[str, ...], tuple[str, ...]]
+
 
 def _unknown_agent_error(agent: str) -> dict[str, Any]:
     """The structured MCP equivalent of the CLI's `_validate_agent` exit.
@@ -33,10 +36,11 @@ def _unknown_agent_error(agent: str) -> dict[str, Any]:
 
 def _discover_files(
     target: Path, single_file: Path | None = None
-) -> tuple[list[Any], str, list[Any], dict[str, str]] | dict[str, Any]:
+) -> tuple[list[Any], str, list[Any], dict[str, str], Excluded] | dict[str, Any]:
     """Detect agents and discover instruction files.
 
-    Returns `(filter_agents, agent, files, file_type_by_path)` on success, or a terminal
+    Returns `(filter_agents, agent, files, file_type_by_path, excluded)` on success, `excluded` being the
+    `(folders, file globs)` the pass left out (empty for a single file), or a terminal
     payload dict when there is nothing to lint: a structured "Unknown agent" error
     (mirroring the CLI's `_validate_agent`) for a misconfigured `default_agent`, or the
     CLI's own benign empty-project envelope (`formatters/json.py::empty_result_payload` —
@@ -76,14 +80,14 @@ def _discover_files(
     if not instruction_files:
         from reporails_cli.formatters.json import empty_result_payload
 
-        return empty_result_payload(target)
+        return empty_result_payload(target, found.excluded)
 
     import_extra, file_type_by_path = apply_generic_scan(
         target, instruction_files, effective_agent, config.generic_scanning, config.exclude_files
     )
     if import_extra:
         instruction_files = list(instruction_files) + import_extra
-    return filter_agents, effective_agent, instruction_files, file_type_by_path
+    return filter_agents, effective_agent, instruction_files, file_type_by_path, found.excluded
 
 
 def _build_map(
@@ -204,7 +208,7 @@ def _run_pipeline(target: Path, full: bool = False) -> tuple[dict[str, Any], Any
     model_error = model_not_ready_error()
     if model_error is not None:
         return model_error, None, None
-    filter_agents, effective_agent, instruction_files, file_type_by_path = discovery
+    filter_agents, effective_agent, instruction_files, file_type_by_path, excluded = discovery
     return _lint_discovered(
         scan_root,
         effective_agent,
@@ -213,6 +217,7 @@ def _run_pipeline(target: Path, full: bool = False) -> tuple[dict[str, Any], Any
         file_type_by_path,
         full=full,
         single_file=single_file,
+        excluded=excluded,
     )
 
 
@@ -224,6 +229,7 @@ def _lint_discovered(
     file_type_by_path: dict[str, str] | None = None,
     full: bool = False,
     single_file: Path | None = None,
+    excluded: Excluded = ((), ()),
 ) -> tuple[dict[str, Any], Any, float | None]:
     """Run M-probes + content/client checks over discovered files; returns `(payload,
     ruleset_map, file_score)`.
@@ -247,7 +253,13 @@ def _lint_discovered(
 
     ruleset_map, mapper_error = _build_map(scan_root, instruction_files, filter_agents)
     result, funnel_error = _check_and_assemble(
-        scan_root, instruction_files, effective_agent, filter_agents, ruleset_map, scoped=single_file is not None
+        scan_root,
+        instruction_files,
+        effective_agent,
+        filter_agents,
+        ruleset_map,
+        excluded,
+        scoped=single_file is not None,
     )
     payload = json_formatter.format_combined_result(
         result, ruleset_map=ruleset_map, project_root=scan_root, file_type_by_path=file_type_by_path
@@ -287,6 +299,7 @@ def _check_and_assemble(
     effective_agent: str,
     filter_agents: list[Any],
     ruleset_map: Any,
+    excluded: Excluded = ((), ()),
     *,
     scoped: bool = False,
 ) -> tuple[Any, Any]:
@@ -302,6 +315,7 @@ def _check_and_assemble(
         local,
         rule_agents=tuple(dict.fromkeys(agent_id for agent_id, _ in pairs)),
         not_evaluated=tuple(unfinished),
+        excluded=excluded,
     )
 
 
@@ -381,18 +395,20 @@ def _assemble_mcp_result(
     local: tuple[list[Any], list[Any], list[Any]],
     rule_agents: tuple[str, ...] = (),
     not_evaluated: tuple[tuple[str, str], ...] = (),
+    excluded: Excluded = ((), ()),
 ) -> tuple[Any, Any]:
     """Server-lint the local findings, then run the shared assemble spine. Returns `(result, funnel_error)`."""
     from dataclasses import replace
 
-    from reporails_cli.core.pipeline.assemble import assemble_result
+    from reporails_cli.core.pipeline.assemble import assemble_result, with_exclusions
 
     inputs = _build_assemble_inputs(
         scan_root, effective_agent, filter_agents, ruleset_map, local, rule_agents, not_evaluated
     )
     lint_result, funnel_error, notices = _server_lint_result(inputs)
-    result = assemble_result(replace(inputs, lint_result=lint_result, notices=notices))
-    return result, funnel_error
+    return with_exclusions(
+        assemble_result(replace(inputs, lint_result=lint_result, notices=notices)), excluded
+    ), funnel_error
 
 
 def _server_lint(inputs: Any) -> Any:

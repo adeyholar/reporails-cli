@@ -362,18 +362,22 @@ def format_server_error(server_error: Any) -> dict[str, Any] | None:
     }
 
 
-def empty_result_payload(project_root: Path | None = None) -> dict[str, Any]:
+def empty_result_payload(
+    project_root: Path | None = None, excluded: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
+) -> dict[str, Any]:
     """The standard envelope for a run that found nothing to check.
 
     A project with no instruction files is an ordinary result over an empty finding
     set, so it formats through `format_combined_result` like any other — same
     top-level keys, `files: {}`, zeroed `stats`, `quality: null`, `level: "L0"`.
     Emitting a smaller, differently-shaped payload instead made every machine
-    consumer branch on two incompatible envelopes for the same command.
+    consumer branch on two incompatible envelopes for the same command. `excluded` is the
+    `(folders, file globs)` the run left out, so a run they emptied still names them.
     """
     from reporails_cli.core.platform.runtime.merger import CombinedResult
 
-    return format_combined_result(CombinedResult(), project_root=project_root)
+    dirs, files = excluded
+    return format_combined_result(CombinedResult(excluded_dirs=dirs, excluded_files=files), project_root=project_root)
 
 
 # `format_combined_result`'s `ruleset_map` when the caller says nothing about mapping;
@@ -512,6 +516,7 @@ def format_combined_result(
         "tier": result.tier,
         "notices": format_notices(result.notices),
         "not_evaluated": [{"rule": rule, "file": file} for rule, file in result.not_evaluated],
+        "excluded": {"dirs": list(result.excluded_dirs), "files": list(result.excluded_files)},
         "quality": (
             float(result.quality.display_score)
             if result.quality is not None and result.quality.display_score is not None

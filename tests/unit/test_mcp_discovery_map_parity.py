@@ -85,7 +85,7 @@ def test_discover_files_discovers_against_filtered_agents(monkeypatch, tmp_path)
 
     monkeypatch.setattr("reporails_cli.core.discovery.agents.get_all_scannable_files", fake_get_all)
 
-    filter_agents, agent, _files, _file_type_by_path = tools._discover_files(tmp_path)
+    filter_agents, agent, _files, _file_type_by_path, _excluded = tools._discover_files(tmp_path)
 
     assert captured["agents"] == sentinel_filtered, "discovery must key off the filtered agent set"
     assert filter_agents == sentinel_filtered

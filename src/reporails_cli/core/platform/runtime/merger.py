@@ -141,6 +141,9 @@ class CombinedResult:
     # The `(rule id, project-relative file)` pairs whose check did not finish in time, so says
     # nothing about that file; empty when every check finished.
     not_evaluated: tuple[tuple[str, str], ...] = ()
+    # The folders and file globs the user left out of the run (built-in default excludes are not listed).
+    excluded_dirs: tuple[str, ...] = ()
+    excluded_files: tuple[str, ...] = ()
 
 
 def _collect_server_diagnostics(

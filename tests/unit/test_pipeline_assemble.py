@@ -468,3 +468,14 @@ def test_heal_exclude_naming_several_files_names_them_all_in_one_sentence(tmp_pa
     [entry] = out.listed
     assert entry.count == 2
     assert [(x.order, x.element) for x in out.locations] == [(1, "b.md")]
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_lint
+def test_with_exclusions_states_the_recorded_value(tmp_path):
+    from reporails_cli.core.pipeline.assemble import with_exclusions
+
+    result = with_exclusions(assemble_result(_inputs(scan_root=tmp_path)), (("agents", "docs"), ("a.md",)))
+    assert result.excluded_dirs == ("agents", "docs")
+    assert result.excluded_files == ("a.md",)
+    assert assemble_result(_inputs(scan_root=tmp_path)).excluded_dirs == ()
