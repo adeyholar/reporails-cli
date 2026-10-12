@@ -15,6 +15,7 @@ import yaml
 
 from reporails_cli.core.classify.content_format import detect_content_format
 from reporails_cli.core.discovery.agent_discovery import is_memory_recall_entry
+from reporails_cli.core.discovery.exclusions import RunExclusions
 from reporails_cli.core.discovery.plugin_roots import config_pattern_hits
 from reporails_cli.core.platform.dto.models import ClassifiedFile, FileMatch, FileTypeDeclaration
 from reporails_cli.core.platform.policy.matching import match_files
@@ -289,6 +290,7 @@ def classify_files(
     file_types: list[FileTypeDeclaration],
     generic_scanning: bool = False,
     skills: Mapping[str, str] | None = None,
+    exclusions: RunExclusions | None = None,
 ) -> list[ClassifiedFile]:
     """Classify files against type declarations. First pattern match wins.
 
@@ -314,6 +316,7 @@ def classify_files(
         skills: Skill folder of each file that sits in a skill, keyed by file path.
             When given, a file is typed `skills` only if it is a key, and carries its
             folder as the `skill` property. None leaves the `skills` type to the pattern.
+        exclusions: The run's exclusions; the link walk skips any target they leave out.
 
     Returns:
         List of ClassifiedFile for matched files
@@ -333,7 +336,7 @@ def classify_files(
             classified.append(cf)
 
     if generic_scanning:
-        classified.extend(_classify_generic_via_links(scan_root, classified))
+        classified.extend(_classify_generic_via_links(scan_root, classified, exclusions))
 
     return classified
 
@@ -341,6 +344,7 @@ def classify_files(
 def _classify_generic_via_links(
     scan_root: Path,
     classified: list[ClassifiedFile],
+    exclusions: RunExclusions | None = None,
 ) -> list[ClassifiedFile]:
     """BFS Markdown links + `@<path>` imports from classified files.
 
@@ -356,7 +360,7 @@ def _classify_generic_via_links(
 
     seed_map: dict[Path, str] = {cf.path: cf.file_type for cf in classified}
     classified_paths = set(seed_map.keys())
-    edges = walk_markdown_links(seed_map, scan_root, classified_paths)
+    edges = walk_markdown_links(seed_map, scan_root, classified_paths, exclusions=exclusions)
 
     by_target: dict[Path, list[LinkEdge]] = {}
     for edge in edges:

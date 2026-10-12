@@ -17,7 +17,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
+
+if TYPE_CHECKING:
+    from reporails_cli.core.discovery.exclusions import RunExclusions
 
 
 class ScopeDiscovery(NamedTuple):
@@ -31,6 +34,8 @@ class ScopeDiscovery(NamedTuple):
     files: list[Path]
     # The `(folders, file globs)` this pass left out because the user set them; empty when it listed no files.
     excluded: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
+    # The run's exclusions (command line joined with config), applied by discovery, the fold and the link walk.
+    exclusions: RunExclusions | None = None
 
 
 def discover_scope(
@@ -40,47 +45,36 @@ def discover_scope(
     exclude_files: list[str] | None = None,
     *,
     scan_files: bool = True,
+    named: frozenset[Path] = frozenset(),
 ) -> ScopeDiscovery:
     """Detect the agents at ``target``, resolve the effective agent and its exclude-filtered
     agent set, and (unless ``scan_files`` is false) list the files a whole-project scan covers.
 
     Both surfaces call this, so ``ails check`` and MCP ``validate`` discover the same way and
-    share one directory listing across the many file-name walks of the pass.
+    share one directory listing across the many file-name walks of the pass. ``exclude_dirs`` and
+    ``exclude_files`` are the command-line patterns; the project's config joins them. ``named`` holds
+    paths the user named on the command line, which stay in the run whatever is excluded.
     """
+    from reporails_cli.core.discovery.exclusions import load_run_exclusions
+
+    exclusions = load_run_exclusions(target, exclude_dirs, exclude_files)
+    detected, resolved, files = _scan(target, agent, exclusions, scan_files)
+    excluded = exclusions.record(sorted(named)) if scan_files else ((), ())
+    return ScopeDiscovery(detected, *resolved, files, excluded, exclusions)
+
+
+def _scan(
+    target: Path, agent: str, exclusions: RunExclusions, scan_files: bool
+) -> tuple[list[Any], tuple[str, bool, bool, list[Any]], list[Path]]:
+    """Detect agents, resolve the effective agent and its filtered agents, and list the files under one dir cache."""
     from reporails_cli.core.discovery.agents import detect_agents, get_all_scannable_files
     from reporails_cli.core.discovery.walk import shared_dir_listings
 
     with shared_dir_listings():
         detected = detect_agents(target)
-        effective, assumed, mixed, filtered = resolve_agent_filters(
-            agent, detected, target, exclude_dirs, exclude_files
-        )
-        files = get_all_scannable_files(target, agents=filtered) if scan_files else []
-    return ScopeDiscovery(
-        detected,
-        effective,
-        assumed,
-        mixed,
-        filtered,
-        files,
-        _applied_exclusions(target, exclude_dirs, exclude_files, scan_files),
-    )
-
-
-def _applied_exclusions(
-    target: Path, exclude_dirs: list[str] | None, exclude_files: list[str] | None, scan_files: bool
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """The user's folders and file globs a scan of `target` leaves out, each sorted and free of repeats.
-
-    Folders are the ones passed plus the project config's, which discovery always applies; file globs
-    are the ones passed. A pass that lists no files left nothing out.
-    """
-    if not scan_files:
-        return (), ()
-    from reporails_cli.core.platform.config.config import get_project_config
-
-    dirs = {*(exclude_dirs or ()), *get_project_config(target).exclude_dirs}
-    return tuple(sorted(dirs)), tuple(sorted(set(exclude_files or ())))
+        resolved = resolve_agent_filters(agent, detected, target, list(exclusions.dirs), list(exclusions.files))
+        files = get_all_scannable_files(target, agents=resolved[3]) if scan_files else []
+    return detected, resolved, files
 
 
 def resolve_agent_filters(
@@ -129,20 +123,18 @@ def apply_generic_scan(
     instruction_files: list[Path],
     agent: str,
     generic_scanning: bool,
-    exclude_files: list[str] | None = None,
+    exclusions: RunExclusions | None = None,
 ) -> tuple[list[Path], dict[str, str]]:
     """Fold ``@``-import-reached (generic) files into the scored set; classify all generic-scanned files.
 
-    Mirrors the CLI check flow's generic-scan fold (`interfaces/cli/check_support.py`'s
-    file-type classification plus the exclude-glob drop applied alongside it) so both
-    surfaces score the same file set under ``generic_scanning: true``. Returns
+    Both surfaces call this one fold, so they score the same file set under
+    ``generic_scanning: true``. The link walk never reaches a file ``exclusions`` leaves out. Returns
     ``(import_extra, file_type_by_path)``:
 
     - ``import_extra`` -- ``@``-import-reached files (``file_type == "generic"``, eagerly
       auto-loaded) to ADD to the mapped + server-scored set so they earn an Imported quality
       score. Markdown-``referenced`` files are deliberately excluded: the harness never loads
       them, so folding them into the score would be a false signal -- they stay lint-only.
-      Entries matching an ``exclude_files`` glob are dropped.
     - ``file_type_by_path`` -- normalized path -> file_type for ALL generic-scanned files
       (generic + referenced), so the display routes them to the Imported surface / Referenced
       panel.
@@ -158,7 +150,9 @@ def apply_generic_scan(
     try:
         file_types = load_file_types(agent, project_root=target)
         with shared_dir_listings():
-            classified = classify_files(target, list(instruction_files), file_types, generic_scanning=True)
+            classified = classify_files(
+                target, list(instruction_files), file_types, generic_scanning=True, exclusions=exclusions
+            )
     except (OSError, ValueError):
         return [], {}
 
@@ -169,10 +163,6 @@ def apply_generic_scan(
         for cf in classified
         if cf.file_type == "generic" and normalize_finding_path(str(cf.path), target) not in seen
     ]
-    if import_extra and exclude_files:
-        from reporails_cli.core.platform.utils.utils import matches_any_glob
-
-        import_extra = [f for f in import_extra if not matches_any_glob(f, exclude_files, target)]
     return import_extra, ft_by_path
 
 

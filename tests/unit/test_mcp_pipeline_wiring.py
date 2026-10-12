@@ -50,7 +50,7 @@ def test_run_pipeline_scopes_a_single_file_target(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "reporails_cli.interfaces.mcp.tools._discover_files",
-        lambda _target, single_file=None: ([], "claude", [single_file], {}, ((), ())),
+        lambda _target, single_file=None: ([], "claude", [single_file], {}, ((), ()), None),
     )
     monkeypatch.setattr("reporails_cli.interfaces.mcp.tools._build_map", lambda *_a, **_k: (None, None))
     monkeypatch.setattr(
@@ -77,7 +77,7 @@ def test_run_pipeline_does_not_scope_a_directory_target(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "reporails_cli.interfaces.mcp.tools._discover_files",
-        lambda _target, single_file=None: ([], "claude", [claude_md], {}, ((), ())),
+        lambda _target, single_file=None: ([], "claude", [claude_md], {}, ((), ()), None),
     )
     monkeypatch.setattr("reporails_cli.interfaces.mcp.tools._build_map", lambda *_a, **_k: (None, None))
     monkeypatch.setattr(
@@ -280,7 +280,7 @@ def test_discover_files_folds_generic_scanned_imports(monkeypatch, tmp_path):
     result = tools._discover_files(tmp_path)
 
     assert not isinstance(result, dict), result
-    _filter_agents, _agent, files, file_type_by_path, _excluded = result
+    _filter_agents, _agent, files, file_type_by_path, _excluded, _exclusions = result
     assert claude_md in files
     assert arch in files
     assert file_type_by_path == {"docs/arch.md": "generic"}
@@ -309,7 +309,7 @@ def test_discover_files_skips_generic_scan_fold_when_disabled(monkeypatch, tmp_p
     result = tools._discover_files(tmp_path)
 
     assert not isinstance(result, dict), result
-    _filter_agents, _agent, files, file_type_by_path, _excluded = result
+    _filter_agents, _agent, files, file_type_by_path, _excluded, _exclusions = result
     assert files == [claude_md]
     assert file_type_by_path == {}
 

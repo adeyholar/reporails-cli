@@ -27,7 +27,7 @@ import typer
 from reporails_cli.core.discovery.walk import safe_resolve
 from reporails_cli.core.lint.regex.not_evaluated import not_evaluated_scope
 from reporails_cli.core.mapper.skills import skill_membership
-from reporails_cli.core.pipeline.mapping import discover_scope
+from reporails_cli.core.pipeline.mapping import apply_generic_scan, discover_scope
 from reporails_cli.interfaces.cli.check_notices import (
     _agent_is_pinned,
     _emit_empty_run,
@@ -51,7 +51,6 @@ from reporails_cli.interfaces.cli.check_orchestration import (
 )
 from reporails_cli.interfaces.cli.check_support import (
     _ensure_model_or_exit,
-    _generic_scan_file_types,
     _heal_authed,
 )
 from reporails_cli.interfaces.cli.helpers import (
@@ -109,8 +108,7 @@ class CheckScope:
     assumed: bool = False
     mixed: bool = False
     filtered: list[Any] = field(default_factory=list)
-    excl: Any = ()
-    excl_files: Any = ()
+    exclusions: Any = None
     instruction_files: list[Path] = field(default_factory=list)
     upfront_paths: set[Path] = field(default_factory=set)
     is_targeted: bool = False
@@ -230,28 +228,18 @@ def _resolve_scope_at_target(state: CheckState) -> None:
     config = get_project_config(state.targets.target)
     state.scope.generic_scanning = bool(config.generic_scanning)
     agent_arg = state.inputs.agent or config.default_agent
-    state.scope.excl = state.inputs.exclude_dirs if state.inputs.exclude_dirs is not None else config.exclude_dirs
-    state.scope.excl_files = (
-        state.inputs.exclude_files if state.inputs.exclude_files is not None else config.exclude_files
-    )
     if agent_arg:
         _validate_agent(agent_arg, console)
     # A single file is checked whatever is excluded, so its pass lists nothing and records nothing.
-    found = discover_scope(
-        state.targets.target,
-        agent_arg,
-        state.scope.excl,
-        state.scope.excl_files,
-        scan_files=state.targets.single_file is None,
-    )
-    state.render.excluded = found.excluded
-    state.scope.detected = found.detected
+    flags = (state.inputs.exclude_dirs, state.inputs.exclude_files)
+    found = discover_scope(state.targets.target, agent_arg, *flags, scan_files=state.targets.single_file is None)
+    state.render.excluded, state.scope.exclusions = found.excluded, found.exclusions
+    state.scope.detected, state.scope.filtered = found.detected, found.filtered
     state.scope.effective_agent, state.scope.assumed, state.scope.mixed = (
         found.effective_agent,
         found.assumed,
         found.mixed,
     )
-    state.scope.filtered = found.filtered
     state.scope.instruction_files = found.files
     if state.targets.single_file is not None:
         state.scope.instruction_files = [safe_resolve(state.targets.single_file)]
@@ -289,7 +277,10 @@ def _narrow_upfront(state: CheckState) -> bool:
         raise typer.Exit(2)
     if state.targets.capability_specs:
         cap_paths, unresolved_skills = _resolve_capability_paths(
-            state.targets.capability_specs, state.scope.effective_agent, state.inputs.project_root, state.scope.excl
+            state.targets.capability_specs,
+            state.scope.effective_agent,
+            state.inputs.project_root,
+            tuple(state.scope.exclusions.dirs),
         )
         state.scope.upfront_paths |= cap_paths
         _warn_unresolved_skills(unresolved_skills, state.inputs.project_root)
@@ -313,15 +304,13 @@ def _narrow_upfront(state: CheckState) -> bool:
 
 def _apply_generic_scan(state: CheckState) -> bool:
     """Fold @-import-reached files into the scored set and compute is_targeted. Always True."""
-    import_extra, state.scope.file_type_by_path = _generic_scan_file_types(
-        state.targets.target, state.scope.instruction_files, state.scope.effective_agent, state.scope.generic_scanning
+    import_extra, state.scope.file_type_by_path = apply_generic_scan(
+        state.targets.target,
+        state.scope.instruction_files,
+        state.scope.effective_agent,
+        state.scope.generic_scanning,
+        state.scope.exclusions,
     )
-    if import_extra and state.scope.excl_files:
-        from reporails_cli.core.platform.utils.utils import matches_any_glob
-
-        import_extra = [
-            f for f in import_extra if not matches_any_glob(f, state.scope.excl_files, state.targets.target)
-        ]
     if import_extra:
         state.scope.instruction_files = list(state.scope.instruction_files) + import_extra
     state.scope.is_targeted = (

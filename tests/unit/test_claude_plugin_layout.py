@@ -18,11 +18,11 @@ import pytest
 from reporails_cli.core.classify import classify_files, load_file_types
 from reporails_cli.core.discovery.agent_discovery import discover_from_config
 from reporails_cli.core.discovery.agents import (
-    DEFAULT_EXCLUDE_DIRS,
     clear_agent_cache,
     detect_agents,
     get_all_instruction_files,
 )
+from reporails_cli.core.discovery.exclusions import DEFAULT_EXCLUDE_DIRS
 from reporails_cli.core.discovery.plugin_roots import (
     expand_plugin_patterns,
     find_plugin_roots,

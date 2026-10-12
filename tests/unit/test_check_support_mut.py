@@ -1,7 +1,7 @@
 """Mutation-killing behavioral tests for `check_support` helpers.
 
 Targets survivors in `_serialize_match`, `_resolve_rule_token`,
-`_generic_scan_file_types`, and `_arm_check_timeout`.
+`apply_generic_scan`, and `_arm_check_timeout`.
 """
 
 from __future__ import annotations
@@ -13,10 +13,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from reporails_cli.core.pipeline.mapping import apply_generic_scan
 from reporails_cli.core.platform.dto.models import ClassifiedFile, FileMatch
 from reporails_cli.interfaces.cli.check_support import (
     _arm_check_timeout,
-    _generic_scan_file_types,
     _resolve_rule_token,
     _serialize_match,
 )
@@ -70,13 +70,15 @@ def test_generic_scan_passes_scanning_true(monkeypatch: pytest.MonkeyPatch) -> N
     # Kills L120 `True -> False`: classify_files must receive generic_scanning=True.
     captured: dict[str, object] = {}
 
-    def fake_classify(scan_root: Path, files: list[Path], file_types: list[object], generic_scanning: bool = False):
+    def fake_classify(
+        scan_root: Path, files: list[Path], file_types: list[object], generic_scanning: bool = False, exclusions=None
+    ):
         captured["generic_scanning"] = generic_scanning
         return []
 
     monkeypatch.setattr("reporails_cli.core.classify.classify_files", fake_classify)
     monkeypatch.setattr("reporails_cli.core.classify.load_file_types", lambda agent, project_root: [])
-    _generic_scan_file_types(Path("/proj"), [], "claude", True)
+    apply_generic_scan(Path("/proj"), [], "claude", True)
     assert captured["generic_scanning"] is True
 
 
@@ -93,11 +95,11 @@ def test_generic_scan_import_extra_filters(monkeypatch: pytest.MonkeyPatch) -> N
     ]
     monkeypatch.setattr(
         "reporails_cli.core.classify.classify_files",
-        lambda scan_root, files, file_types, generic_scanning=False: classified,
+        lambda scan_root, files, file_types, generic_scanning=False, exclusions=None: classified,
     )
     monkeypatch.setattr("reporails_cli.core.classify.load_file_types", lambda agent, project_root: [])
 
-    import_extra, _ft_by_path = _generic_scan_file_types(target, instruction_files, "claude", True)
+    import_extra, _ft_by_path = apply_generic_scan(target, instruction_files, "claude", True)
 
     assert (target / "B.md") in import_extra
     assert (target / "A.md") not in import_extra

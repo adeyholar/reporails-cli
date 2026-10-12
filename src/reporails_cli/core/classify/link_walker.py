@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from reporails_cli.core.discovery.exclusions import RunExclusions
 from reporails_cli.core.discovery.walk import safe_resolve
 from reporails_cli.core.mapper.imports import import_refs
 from reporails_cli.core.mapper.structure import link_targets, strip_anchor
@@ -29,18 +30,22 @@ def walk_markdown_links(
     project_root: Path,
     classified_paths: set[Path],
     max_depth: int = 3,
+    exclusions: RunExclusions | None = None,
 ) -> list[LinkEdge]:
-    """BFS outgoing Markdown links + `@<path>` imports from `start_paths`; emit one edge per `(source, target)`."""
+    """BFS outgoing Markdown links + `@<path>` imports from `start_paths`; emit one edge per `(source, target)`.
+
+    A target the run's exclusions leave out gets no edge and is not walked further; seeds are always walked.
+    """
     classified_resolved = {safe_resolve(p) for p in classified_paths}
     project_root_resolved = safe_resolve(project_root)
 
-    seed_resolved: dict[Path, str] = {safe_resolve(p): ft for p, ft in start_paths.items() if p.exists()}
-    visited: set[Path] = set(seed_resolved.keys())
+    seeds = {safe_resolve(p): ft for p, ft in start_paths.items() if p.exists()}
+    visited: set[Path] = set(seeds)
 
     # Frontier: (resolved_path, depth_already_taken, source_type)
     # `depth_already_taken` is the depth at which this node was reached;
     # outgoing edges from this node land at depth+1.
-    frontier: list[tuple[Path, int, str]] = [(resolved, 0, ft) for resolved, ft in seed_resolved.items()]
+    frontier: list[tuple[Path, int, str]] = [(resolved, 0, ft) for resolved, ft in seeds.items()]
 
     # Per-target edges: keyed by (source, target, verb) so each distinct
     # (linking file, target, loading verb) tuple contributes one edge —
@@ -59,6 +64,8 @@ def walk_markdown_links(
             if not resolved.is_file():
                 continue
             if resolved in classified_resolved:
+                continue
+            if exclusions is not None and exclusions.leaves_out(resolved):
                 continue
             key = (current, resolved, verb)
             if key not in edges:

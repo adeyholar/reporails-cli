@@ -19,6 +19,7 @@ from reporails_cli.core.discovery.agent_discovery import categorize_file_type as
 from reporails_cli.core.discovery.agent_discovery import config_names_agent as _config_names_agent
 from reporails_cli.core.discovery.agent_discovery import discover_from_config as _discover_from_config
 from reporails_cli.core.discovery.agent_markers import agent_has_marker, dir_prefix_from_glob
+from reporails_cli.core.discovery.exclusions import load_run_exclusions
 from reporails_cli.core.discovery.file_aliases import _dedupe_with_aliases, _store_alias_cache, clear_alias_cache
 from reporails_cli.core.platform.config.config import get_project_config
 from reporails_cli.core.platform.utils.utils import matches_any_glob
@@ -206,49 +207,9 @@ def clear_agent_cache() -> None:
 # ─── Public API ─────────────────────────────────────────────────────────
 
 
-DEFAULT_EXCLUDE_DIRS: frozenset[str] = frozenset(
-    {
-        # VCS
-        ".git",
-        ".svn",
-        ".hg",
-        # Python
-        "__pycache__",
-        ".venv",
-        "venv",
-        ".env",
-        ".mypy_cache",
-        ".ruff_cache",
-        ".pytest_cache",
-        # JS/TS
-        "node_modules",
-        # Build output
-        "dist",
-        "build",
-        "target",
-        "out",
-        # Data / artifacts (instruction files never live here)
-        "data",
-        "datasets",
-        # Vendored
-        "vendor",
-        # IDE / OS
-        ".idea",
-        # `.vscode` is deliberately absent: Copilot declares real config/mcp
-        # surfaces there (`.vscode/{settings,mcp}.json`), pre-filtered out otherwise.
-    }
-)
-
-
 def load_project_exclude_dirs(target: Path) -> frozenset[str]:
-    """The built-in default excludes plus the project's `exclude_dirs`.
-
-    Built-in defaults cover directories that never contain instruction files
-    (VCS internals, caches, node_modules, data). The project's `exclude_dirs`
-    (`.ails/config.yml`, `.ails/config.local.yml` and the global config)
-    extend — not replace — these defaults.
-    """
-    return DEFAULT_EXCLUDE_DIRS | frozenset(get_project_config(target).exclude_dirs)
+    """The built-in default excludes plus the project's `exclude_dirs`."""
+    return load_run_exclusions(target).walk_dirs
 
 
 def detect_agents(

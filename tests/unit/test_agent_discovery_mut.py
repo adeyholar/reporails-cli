@@ -15,7 +15,7 @@ import pytest
 
 from reporails_cli.core.discovery import agent_discovery as ad
 from reporails_cli.core.discovery import walk
-from reporails_cli.core.discovery.agents import DEFAULT_EXCLUDE_DIRS
+from reporails_cli.core.discovery.exclusions import DEFAULT_EXCLUDE_DIRS
 from tests.conftest import skip_if_case_insensitive_fs
 
 # --- is_excluded (L90) ------------------------------------------------------

@@ -37,12 +37,12 @@ def _unknown_agent_error(agent: str) -> dict[str, Any]:
 
 def _discover_files(
     target: Path, single_file: Path | None = None
-) -> tuple[list[Any], str, list[Any], dict[str, str], Excluded] | dict[str, Any]:
+) -> tuple[list[Any], str, list[Any], dict[str, str], Excluded, Any] | dict[str, Any]:
     """Detect agents and discover instruction files.
 
-    Returns `(filter_agents, agent, files, file_type_by_path, excluded)` on success, `excluded` being the
-    `(folders, file globs)` the pass left out (empty for a single file), or a terminal
-    payload dict when there is nothing to lint: a structured "Unknown agent" error
+    Returns `(filter_agents, agent, files, file_type_by_path, excluded, exclusions)` on success, `excluded` being the
+    `(folders, file globs)` the pass left out (empty for a single file) and `exclusions` the run's exclusion set, or a
+    terminal payload dict when there is nothing to lint: a structured "Unknown agent" error
     (mirroring the CLI's `_validate_agent`) for a misconfigured `default_agent`, or the
     CLI's own benign empty-project envelope (`formatters/json.py::empty_result_payload` —
     the SAME top-level shape a normal run emits, with `files: {}` and zeroed `stats`)
@@ -73,9 +73,7 @@ def _discover_files(
     # the whole-project scan can legitimately come up with nothing to lint. The whole-project
     # scan includes each agent's config surfaces (hooks, permissions, MCP declarations, plugin
     # manifests) alongside its instruction and rule files, matching `ails check`'s own scope.
-    found = discover_scope(
-        target, config.default_agent, config.exclude_dirs, config.exclude_files, scan_files=single_file is None
-    )
+    found = discover_scope(target, config.default_agent, None, None, scan_files=single_file is None)
     effective_agent, filter_agents = found.effective_agent, found.filtered
     instruction_files = [safe_resolve(single_file)] if single_file is not None else found.files
     if not instruction_files:
@@ -84,11 +82,11 @@ def _discover_files(
         return empty_result_payload(target, found.excluded)
 
     import_extra, file_type_by_path = apply_generic_scan(
-        target, instruction_files, effective_agent, config.generic_scanning, config.exclude_files
+        target, instruction_files, effective_agent, config.generic_scanning, found.exclusions
     )
     if import_extra:
         instruction_files = list(instruction_files) + import_extra
-    return filter_agents, effective_agent, instruction_files, file_type_by_path, found.excluded
+    return filter_agents, effective_agent, instruction_files, file_type_by_path, found.excluded, found.exclusions
 
 
 def _build_map(
@@ -209,7 +207,7 @@ def _run_pipeline(target: Path, full: bool = False) -> tuple[dict[str, Any], Any
     model_error = model_not_ready_error()
     if model_error is not None:
         return model_error, None, None
-    filter_agents, effective_agent, instruction_files, file_type_by_path, excluded = discovery
+    filter_agents, effective_agent, instruction_files, file_type_by_path, excluded, _exclusions = discovery
     return _lint_discovered(
         scan_root,
         effective_agent,
