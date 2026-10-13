@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-from reporails_cli.core.lint.mechanical.checks import _resolve_glob_targets, get_target_files
+from reporails_cli.core.lint.mechanical.checks import _resolve_glob_targets, get_target_files, run_exclusions
 from reporails_cli.core.platform.dto.checks import CheckResult
 from reporails_cli.core.platform.dto.models import ClassifiedFile
 from reporails_cli.core.platform.utils.hook_config import HookPath, read_hook_config, value_at, walk_hooks
@@ -140,7 +140,10 @@ def _target_files(root: Path, args: dict[str, Any], classified_files: list[Class
     """The files to read: the rule's own files, or every JSON / TOML file under ``root`` when none is classified."""
     if classified_files or args.get("path"):
         return get_target_files(args, classified_files, root)
-    found = {path for pattern in ("**/*.json", "**/*.toml") for path in _resolve_glob_targets(pattern, root)}
+    exclusions = run_exclusions(args, root)
+    found = {
+        path for pattern in ("**/*.json", "**/*.toml") for path in _resolve_glob_targets(pattern, root, exclusions)
+    }
     return sorted(path for path in found if path.is_file())
 
 

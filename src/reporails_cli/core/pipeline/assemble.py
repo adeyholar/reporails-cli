@@ -139,15 +139,16 @@ def with_exclusions(result: Any, exclusions: tuple[tuple[str, ...], tuple[str, .
     )
 
 
+def _imported_source(atom: Any) -> str:
+    """The path an atom's imported text comes from, next to the importing file's real location."""
+    return str(os.path.normpath(safe_resolve(Path(atom.file_path)).parent / atom.imported_from))
+
+
 def _imports_left_out(inp: AssembleInputs, exclusions: RunExclusions | None) -> bool:
     """True when an instruction in a checked file comes from a file the run left out."""
     if exclusions is None or inp.ruleset_map is None:
         return False
-    sources = {
-        os.path.normpath(Path(atom.file_path).parent / atom.imported_from)
-        for atom in getattr(inp.ruleset_map, "atoms", ())
-        if atom.imported_from
-    }
+    sources = {_imported_source(atom) for atom in getattr(inp.ruleset_map, "atoms", ()) if atom.imported_from}
     return any(exclusions.leaves_out(inp.scan_root / source) for source in sources)
 
 
@@ -166,7 +167,7 @@ def _imported_note(atom: Any, scan_root: Path) -> str:
     """` (from docs/style.md:7: "Keep the diff small.")` — where an imported instruction is written."""
     from reporails_cli.core.platform.runtime.merger import normalize_finding_path
 
-    where = normalize_finding_path((Path(atom.file_path).parent / atom.imported_from).as_posix(), scan_root)
+    where = normalize_finding_path(Path(_imported_source(atom)).as_posix(), scan_root)
     text = " ".join(atom.text.split())
     quote = text if len(text) <= _QUOTE_MAX_CHARS else text[: _QUOTE_MAX_CHARS - 1].rstrip() + "…"
     return f' (from {where}:{atom.imported_line}: "{quote}")'

@@ -404,7 +404,7 @@ JSON output is one object per run, grouping findings under `files` keyed by path
   "elapsed_ms": 593.5,
   "notices": [],
   "not_evaluated": [],
-  "excluded": {"dirs": [], "files": []},
+  "excluded": {"dirs": [], "files": [], "imported_text_counted": false},
   "files": {
     "CLAUDE.md": {
       "findings": [
@@ -449,7 +449,7 @@ Always present, regardless of tier: `offline`, `server_error`, `tier`, `quality`
 
 `not_evaluated` lists the checks that did not finish on a file, as `{rule, file}`; it is `[]` when every check finished. A check that runs out of time on a very large file reports no finding for that file rather than a guess, so a rule named here was neither passed nor failed there. Text output names them in one line per file under the results.
 
-`excluded` lists what you left out of the run: `dirs` (from `--exclude-dirs` and `exclude_dirs` together) and `files` (from `--exclude-files` when you pass it, otherwise `exclude_files`). Both are `[]` when you excluded nothing, and the built-in excludes are not listed. When either is non-empty, the score covers only the rest of the project.
+`excluded` lists what you left out of the run, as `{dirs, files, imported_text_counted}`. `dirs` and `files` are the patterns you pass on the command line (`--exclude-dirs`, `--exclude-files`) joined with `exclude_dirs` and `exclude_files` from your config, sorted and without repeats; neither replaces the other. Both are `[]` when you excluded nothing, and the folders skipped by default (such as `node_modules`) are not listed. A folder name matches that folder at any depth; a value with a `/` (`.claude/rules`) is a folder path from the project root; a trailing `/` is ignored. A file or capability you name on the command line is checked even inside a left-out folder. On a run narrowed to named targets, the patterns a named target matches are not listed, and a run of a single file lists none. `imported_text_counted` is `true` when text a checked file imports with `@path` comes from a left-out file (that text still counts inside the importing file), and `false` otherwise. When `dirs` or `files` is non-empty, the score covers only the rest of the project.
 
 Two additive fields enrich the output when the analysis service has data for the run. Both are **additive and backward-compatible** — existing JSON consumers and CI baselines that ignore them keep working unchanged:
 

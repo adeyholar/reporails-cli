@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
+from functools import cached_property
 from pathlib import Path
 
 from reporails_cli.core.discovery.walk import safe_resolve
@@ -69,33 +70,32 @@ class RunExclusions:
         """A copy that also treats `paths` as named by the user."""
         return replace(self, named=self.named | {safe_resolve(p) for p in paths})
 
-    @property
+    @cached_property
+    def _roots(self) -> tuple[Path, ...]:
+        """The root as given and, when different, resolved."""
+        resolved = safe_resolve(self.root)
+        return (self.root,) if resolved == self.root else (self.root, resolved)
+
+    @cached_property
     def feature_walk_dirs(self) -> frozenset[str]:
-        """The built-in defaults plus the user's folders that hold no named file."""
-        return DEFAULT_EXCLUDE_DIRS | {d for d in self.dirs if not any(self._dir_matches(p, d) for p in self.named)}
+        """The built-in defaults plus the user's folder names that hold no named file."""
+        return DEFAULT_EXCLUDE_DIRS | {
+            d for d in self.dirs if "/" not in d and not any(self._dir_matches(p, d) for p in self.named)
+        }
 
     def leaves_out(self, path: Path) -> bool:
         """True when `path` sits in a folder the user left out or matches a file glob the user left out.
 
-        A named path is never left out. Built-in defaults never count. The path is tried as given
-        and resolved, against the root as given and resolved.
+        A folder value without `/` is a folder name matched at any depth; one with `/` is a folder
+        relative to the root. A named path is never left out. Built-in defaults never count. The path
+        is tried as given and resolved, against the root as given and resolved.
         """
         if not self.dirs and not self.files:
             return False
-        if self.named and safe_resolve(path) in self.named:
+        resolved = safe_resolve(path)
+        if self.named and resolved in self.named:
             return False
-        roots = (self.root, safe_resolve(self.root))
-        for candidate in (path, safe_resolve(path)):
-            for root in roots:
-                try:
-                    parts = candidate.relative_to(root).parts
-                except ValueError:
-                    parts = ()
-                if self.dirs and excluded_by_name(parts, self.dirs):
-                    return True
-                if self.files and matches_any_glob(candidate, list(self.files), root):
-                    return True
-        return False
+        return self._hit(path, resolved, tuple(self.dirs), self.files)
 
     def record(self, *, narrowed: bool = False) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """The `(folders, file globs)` to report: every user pattern, sorted, without repeats.
@@ -109,10 +109,36 @@ class RunExclusions:
         return tuple(dirs), tuple(files)
 
     def _dir_matches(self, path: Path, name: str) -> bool:
-        return RunExclusions(self.root, frozenset({name})).leaves_out(path)
+        return self._hit(path, safe_resolve(path), (name,), ())
 
     def _glob_matches(self, path: Path, glob: str) -> bool:
-        return RunExclusions(self.root, files=(glob,)).leaves_out(path)
+        return self._hit(path, safe_resolve(path), (), (glob,))
+
+    def _hit(self, path: Path, resolved: Path, dirs: tuple[str, ...], files: tuple[str, ...]) -> bool:
+        """True when `path` (or its `resolved` form) falls under one of `dirs` or matches one of `files`."""
+        names = frozenset(d for d in dirs if "/" not in d)
+        prefixes = [tuple(d.split("/")) for d in dirs if "/" in d]
+        for candidate in (path,) if resolved == path else (path, resolved):
+            for root in self._roots:
+                try:
+                    parts = candidate.relative_to(root).parts
+                except ValueError:
+                    parts = ()
+                if names and excluded_by_name(parts, names):
+                    return True
+                if any(parts[: len(prefix)] == prefix for prefix in prefixes):
+                    return True
+                if files and matches_any_glob(candidate, list(files), root):
+                    return True
+        return False
+
+
+def _normalized_dir(value: str) -> str:
+    """A folder value without a leading `./` or trailing `/`; empty when nothing is left."""
+    value = value.strip()
+    while value.startswith("./"):
+        value = value[2:]
+    return value.rstrip("/")
 
 
 def load_run_exclusions(
@@ -120,6 +146,8 @@ def load_run_exclusions(
 ) -> RunExclusions:
     """The run's exclusions at `target`: command-line patterns joined with the project's config."""
     config = get_project_config(target)
-    dirs = frozenset((*(flag_dirs or ()), *config.exclude_dirs))
+    dirs = frozenset(d for d in map(_normalized_dir, (*(flag_dirs or ()), *config.exclude_dirs)) if d)
     files = tuple(dict.fromkeys((*(flag_files or ()), *config.exclude_files)))
-    return RunExclusions(root=target, dirs=dirs, files=files, walk_dirs=DEFAULT_EXCLUDE_DIRS | dirs)
+    return RunExclusions(
+        root=target, dirs=dirs, files=files, walk_dirs=DEFAULT_EXCLUDE_DIRS | {d for d in dirs if "/" not in d}
+    )

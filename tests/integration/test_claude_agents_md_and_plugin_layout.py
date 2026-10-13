@@ -102,7 +102,7 @@ def _resolution(project: Path) -> tuple[str, bool, dict[str, str], set[str]]:
 
     clear_agent_cache()
     detected = detect_agents(project)
-    effective, _assumed, mixed, filtered = resolve_agent_filters("", detected, project, None, None)
+    effective, _assumed, mixed, filtered = resolve_agent_filters("", detected, project)
     owners = {
         Path(p).relative_to(project).as_posix(): o for p, o in partition_by_native_owner(filtered, project).items()
     }

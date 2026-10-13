@@ -30,6 +30,10 @@ WIRE_MAX_FILES = 500
 # How many of the densest top-level folders a refusal names.
 _DENSE_DIRS_SHOWN = 5
 
+# The route search: how many candidate folder names it weighs, and the most names it combines.
+_ROUTE_POOL = 16
+_ROUTE_MAX_NAMES = 4
+
 # A 5xx reply is parsed only when it names a failure that clears on its own.
 _RETRYABLE_STATUSES = (503, 504)
 
@@ -160,9 +164,9 @@ def _dense_dirs_and_route(payload: dict[str, Any], cap: int) -> tuple[tuple[tupl
     """The densest folder paths with their atom counts, and the folder names to leave out to get under `cap`.
 
     A name removes every file with that name anywhere in its path (the way `--exclude-dirs`
-    works). The route keeps as much checked as possible: the one name with the smallest removal
-    that covers the excess, else names added by the most atoms not already removed until the
-    atoms left fit. It is empty when no set of names brings the project under the cap.
+    works). The route keeps as much checked as possible: the names, one or several, whose combined
+    removal is the smallest that covers the excess. It is empty when no set of names brings the
+    project under the cap.
     """
     per_file = _atoms_per_file(payload)
     total = len(payload.get("atoms", []))
@@ -181,23 +185,59 @@ def _files_by_name(per_file: dict[str, int]) -> dict[str, set[str]]:
 
 
 def _route(by_name: dict[str, set[str]], per_file: dict[str, int], excess: int) -> tuple[str, ...]:
-    """The folder names to leave out so at least `excess` atoms go, keeping the most checked; empty when none do."""
+    """The folder names (in name order) whose combined removal is the smallest that takes out `excess` atoms.
+
+    The search is exact over a bounded set: names whose own removal is below the smallest single
+    sufficient name's (every name when none suffices), the 16 largest of those, in sets of up to
+    four. Ties go to fewer names, then name order. When that search finds no cover, names are added
+    by the most atoms not already removed until the excess is met. Empty when no set of names covers it.
+    """
 
     def weight(paths: set[str]) -> int:
         return sum(per_file[path] for path in paths)
 
     removal = {name: weight(paths) for name, paths in by_name.items()}
-    sufficient = sorted((n, name) for name, n in removal.items() if n >= excess)
-    if sufficient:
-        return (sufficient[0][1],)
     if weight(set().union(*by_name.values())) < excess:
         return ()
+    single = min(((n, name) for name, n in removal.items() if n >= excess), default=None)
+    pool = [name for name, n in removal.items() if single is None or n < single[0]]
+    pool = sorted(sorted(pool, key=lambda name: (-removal[name], name))[:_ROUTE_POOL], key=str)
+    best: tuple[int, int, tuple[str, ...]] | None = (single[0], 1, (single[1],)) if single else None
+
+    def search(start: int, chosen: tuple[str, ...], covered: set[str], removed: int) -> None:
+        nonlocal best
+        for i in range(start, len(pool)):
+            name = pool[i]
+            fresh = by_name[name] - covered
+            total = removed + weight(fresh)
+            if best is not None and total > best[0]:
+                continue
+            names = (*chosen, name)
+            if total >= excess:
+                key = (total, len(names), names)
+                if best is None or key < best:
+                    best = key
+            elif len(names) < _ROUTE_MAX_NAMES:
+                search(i + 1, names, covered | fresh, total)
+
+    search(0, (), set(), 0)
+    if best is not None:
+        return best[2]
+    return _greedy_route(by_name, per_file, excess)
+
+
+def _greedy_route(by_name: dict[str, set[str]], per_file: dict[str, int], excess: int) -> tuple[str, ...]:
+    """Names added by the most atoms not already removed until `excess` atoms go; empty when they never do."""
     chosen: list[str] = []
     covered: set[str] = set()
     left = excess
     while left > 0:
         gain, best = min(
-            ((weight(paths - covered), name) for name, paths in by_name.items() if name not in chosen),
+            (
+                (sum(per_file[path] for path in paths - covered), name)
+                for name, paths in by_name.items()
+                if name not in chosen
+            ),
             key=lambda item: (-item[0], item[1]),
         )
         if gain <= 0:

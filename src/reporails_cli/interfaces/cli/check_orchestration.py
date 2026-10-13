@@ -82,25 +82,12 @@ def _resolve_capability_paths(
     return paths, unresolved
 
 
-def _put_back_named(state: Any, named: set[Path]) -> None:
-    """Add the named files and capabilities that the exclusions left out to the run's scope; the Excluded
-    record keeps only the patterns that no named target matches."""
-    from reporails_cli.core.pipeline.mapping import ScopeDiscovery, with_named
-
-    scope = state.scope
-    found = ScopeDiscovery(
-        scope.detected,
-        scope.effective_agent,
-        scope.assumed,
-        scope.mixed,
-        scope.filtered,
-        scope.instruction_files,
-        state.render.excluded,
-        scope.exclusions,
+def _named_paths(state: Any, capability_paths: frozenset[Path]) -> frozenset[Path]:
+    """The files the run names: capability paths, path targets that are files, and the single file."""
+    single = state.targets.single_file
+    return frozenset(
+        capability_paths | {t for t in state.targets.path_targets if t.is_file()} | ({single} if single else set())
     )
-    found = with_named(found, named, narrowed=True)
-    scope.filtered, scope.instruction_files = found.filtered, found.files
-    state.render.excluded, scope.exclusions = found.excluded, found.exclusions
 
 
 def _resolved_within_target(f: Path, target: Path) -> bool:

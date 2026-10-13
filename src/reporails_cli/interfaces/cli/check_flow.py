@@ -40,8 +40,8 @@ from reporails_cli.interfaces.cli.check_orchestration import (
     _dispatch_output,
     _emit_stage_timing,
     _file_under_target,
+    _named_paths,
     _narrow_to_path_targets,
-    _put_back_named,
     _quiet_mapper_logs,
     _resolve_capability_paths,
     _resolved_within_target,
@@ -216,7 +216,7 @@ def _flow_targets(state: CheckState) -> None:
         raise typer.Exit(2)
 
 
-def _resolve_scope_at_target(state: CheckState) -> None:
+def _resolve_scope_at_target(state: CheckState, capability_paths: frozenset[Path] = frozenset()) -> None:
     """Detect agents at the current scan root and discover the scannable files under it.
 
     The scope includes each agent's config surfaces (hooks, permissions, MCP
@@ -233,9 +233,9 @@ def _resolve_scope_at_target(state: CheckState) -> None:
     if agent_arg:
         _validate_agent(agent_arg, console)
     # A single file is checked whatever is excluded, so its pass lists nothing and records nothing.
-    flags = (state.inputs.exclude_dirs, state.inputs.exclude_files)
-    named = frozenset(filter(None, [state.targets.single_file]))
-    found = discover_scope(state.targets.target, agent_arg, *flags, scan_files=not named, named=named)
+    flags, named = (state.inputs.exclude_dirs, state.inputs.exclude_files), _named_paths(state, capability_paths)
+    scan = not state.targets.single_file
+    found = discover_scope(state.targets.target, agent_arg, *flags, scan_files=scan, named=named, narrowed=bool(named))
     state.render.excluded, state.scope.exclusions = found.excluded, found.exclusions
     state.scope.detected, state.scope.filtered = found.detected, found.filtered
     state.scope.effective_agent, state.scope.assumed, state.scope.mixed = (
@@ -288,9 +288,8 @@ def _narrow_upfront(state: CheckState) -> bool:
         )
         state.scope.upfront_paths |= cap_paths
         _warn_unresolved_skills(unresolved_skills, state.inputs.project_root)
-    named = cap_paths | {t for t in state.targets.path_targets if t.is_file()}
-    if named:
-        _put_back_named(state, named)
+    if cap_paths:
+        _resolve_scope_at_target(state, frozenset(cap_paths))
     if state.targets.path_targets:
         state.scope.upfront_paths |= set(
             _narrow_to_path_targets(state.scope.instruction_files, state.targets.path_targets)
@@ -300,7 +299,7 @@ def _narrow_upfront(state: CheckState) -> bool:
         return False
     if state.scope.upfront_paths:
         state.scope.instruction_files = [f for f in state.scope.instruction_files if f in state.scope.upfront_paths]
-        # Capability targets are authoritative — keep resolved targets broad discovery dropped.
+        # A capability target is checked even when no agent's file list holds it (a referenced file).
         discovered = {safe_resolve(f) for f in state.scope.instruction_files}
         state.scope.instruction_files += [p for p in cap_paths if safe_resolve(p) not in discovered]
         if not state.scope.instruction_files:

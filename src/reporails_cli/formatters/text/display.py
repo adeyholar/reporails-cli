@@ -42,6 +42,7 @@ from reporails_cli.formatters.text.scorecard import (
     print_scorecard,
 )
 from reporails_cli.formatters.text.triage_view import print_file_card
+from reporails_cli.formatters.text.verdict import render_excluded_line
 from reporails_cli.formatters.triage import split_conventions
 
 console = Console()
@@ -359,6 +360,7 @@ def print_text_result(
     _print_notices(result.notices, ascii_mode)
     if not result.findings:
         console.print(f"  {'ok' if ascii_mode else chr(0x2713)}  No findings.")
+        render_excluded_line(result, scored=has_quality)
         print_not_evaluated(console, result.not_evaluated)
         _render_funnel_cta(funnel_error)
         return

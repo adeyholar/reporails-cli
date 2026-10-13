@@ -252,7 +252,8 @@ def list_capability_targets(
         if decl is None:
             continue
         if _is_user_scope_memory(ft_name, decl.patterns):
-            paths = _user_scope_memory_paths(agent, project_root)
+            paths = _user_scope_memory_paths(agent, project_root, exclusions.walk_dirs)
+            paths = [p for p in paths if not exclusions.leaves_out(p)]
         else:
             paths = _glob_patterns(decl.patterns, project_root, exclusions.walk_dirs, decl=decl)
             paths = [p for p in paths if not exclusions.leaves_out(p)]
@@ -317,11 +318,11 @@ def _is_user_scope_memory(ft_name: str, patterns: tuple[str, ...]) -> bool:
     return any(p.startswith("~/") for p in patterns)
 
 
-def _user_scope_memory_paths(agent: str, project_root: Path) -> list[Path]:
-    """Resolve user-scope memory entries via memory_locator."""
+def _user_scope_memory_paths(agent: str, project_root: Path, exclude_dirs: frozenset[str]) -> list[Path]:
+    """Resolve user-scope memory entries via memory_locator, not entering `exclude_dirs`."""
     from reporails_cli.core.discovery.memory_locator import memory_entries_for_agent
 
-    return [entry.path for entry in memory_entries_for_agent(agent, project_root)]
+    return [entry.path for entry in memory_entries_for_agent(agent, project_root, exclude_dirs)]
 
 
 def resolve_capability(

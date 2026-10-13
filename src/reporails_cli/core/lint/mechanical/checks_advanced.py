@@ -10,13 +10,14 @@ import re
 from pathlib import Path
 from typing import Any
 
-from reporails_cli.core.discovery.agents import load_project_exclude_dirs
+from reporails_cli.core.discovery.exclusions import DEFAULT_EXCLUDE_DIRS
 from reporails_cli.core.discovery.walk import safe_resolve, walk_files, walk_glob_matches
 from reporails_cli.core.lint.mechanical.checks import (
     _get_counted_files,
     _resolve_glob_targets,
     _safe_float,
     get_target_files,
+    run_exclusions,
 )
 from reporails_cli.core.mapper.imports import import_refs, import_refs_with_lines, import_target
 from reporails_cli.core.mapper.inspect import path_filter_key, split_top_level_commas
@@ -381,13 +382,17 @@ def frontmatter_valid_glob(
     if not target.is_dir():
         return CheckResult(passed=True, message=f"Directory not found: {path} (OK)")
     unresolved: list[tuple[str, str]] = []
-    exclude_dirs = load_project_exclude_dirs(root)
-    subjects = list(walk_files(target, exclude_dirs, lambda f: f.suffix in (".md", ".mdc")))
+    exclusions = run_exclusions(args, root)
+    subjects = [
+        f
+        for f in walk_files(target, exclusions.feature_walk_dirs, lambda f: f.suffix in (".md", ".mdc"))
+        if not exclusions.leaves_out(f)
+    ]
     if classified_files:
         checked = {safe_resolve(cf.path) for cf in classified_files}
         subjects = [f for f in subjects if safe_resolve(f) in checked]
     for f in sorted(subjects):
-        result = _validate_file_globs(f, root, require_matches, lenient, unresolved, exclude_dirs)
+        result = _validate_file_globs(f, root, require_matches, lenient, unresolved)
         if result is not None:
             return result
     if unresolved:
@@ -409,13 +414,13 @@ def _validate_file_globs(
     require_matches: bool,
     lenient: bool,
     unresolved: list[tuple[str, str]],
-    exclude_dirs: frozenset[str],
 ) -> CheckResult | None:
     """Validate glob entries in a single file's frontmatter. Returns CheckResult on error, None to continue.
 
     Each glob that matches no project file is added to ``unresolved`` as ``(file:line, glob)``, on the
-    line that holds it. Globs match from the project root (a leading ``/`` is dropped); only the folder
-    a glob names is walked, and the walk stops at the first match.
+    line that holds it. Globs match from the project root (a leading ``/`` is dropped) against source files
+    that exist, so only the built-in default folders are skipped; only the folder a glob names is walked,
+    and the walk stops at the first match.
     """
     read = read_frontmatter_file(f, lenient=lenient)
     if read is None or read.block is None or read.data is None:
@@ -429,7 +434,7 @@ def _validate_file_globs(
             return CheckResult(passed=False, message=f"{f.name}: non-string path: {p}")
         if p.count("[") != p.count("]"):
             return CheckResult(passed=False, message=f"{f.name}: unbalanced brackets: {p}")
-        if require_matches and next(walk_glob_matches(root, p, exclude_dirs), None) is None:
+        if require_matches and next(walk_glob_matches(root, p, DEFAULT_EXCLUDE_DIRS), None) is None:
             unresolved.append((f"{f.relative_to(root).as_posix()}:{_frontmatter_line(read.block, p)}", p))
     return None
 
@@ -720,6 +725,7 @@ def file_absent(
     if not pattern:
         return CheckResult(passed=False, message="file_absent: no pattern specified")
     match_type = args.get("_match_type", "")
+    exclusions = run_exclusions(args, root)
     scope_dir = _resolve_scope_dir(match_type, classified_files)
 
     # If the rule targets a specific file type but no files of that type were
@@ -732,14 +738,18 @@ def file_absent(
     if scope_dir:
         scope_root = root / scope_dir
         direct_path = scope_root / pattern
-        matches = list(walk_glob_matches(scope_root, f"**/{pattern}", load_project_exclude_dirs(root)))
+        matches = [
+            m
+            for m in walk_glob_matches(scope_root, f"**/{pattern}", exclusions.feature_walk_dirs)
+            if not exclusions.leaves_out(m)
+        ]
     else:
         direct_path = root / pattern
-        matches = _resolve_glob_targets(pattern, root)
+        matches = _resolve_glob_targets(pattern, root, exclusions)
     if matches:
         name = matches[0].relative_to(root).as_posix() if matches[0].is_relative_to(root) else matches[0].name
         return CheckResult(passed=False, message=f"Forbidden file exists: {name}")
-    if direct_path.exists():
+    if direct_path.exists() and not exclusions.leaves_out(direct_path):
         rel = f"{scope_dir}/{pattern}" if scope_dir else pattern
         return CheckResult(passed=False, message=f"Forbidden file exists: {rel}")
     return CheckResult(passed=True, message="Forbidden file not found")

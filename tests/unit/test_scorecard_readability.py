@@ -337,3 +337,48 @@ class TestExcludedLine:
             scorecard.console.width = None
         start = next(i for i, ln in enumerate(lines) if ln.startswith("  Excluded"))
         assert lines[start + 1].startswith(" " * 12)
+
+
+class TestExcludedLineOnEveryTextPath:
+    @staticmethod
+    def _no_findings(capsys: pytest.CaptureFixture[str], **fields: object) -> str:
+        from reporails_cli.core.platform.runtime.merger import CombinedResult
+        from reporails_cli.formatters.text import display
+
+        result = CombinedResult(quality=None, **fields)  # type: ignore[arg-type]
+        display.print_text_result(result, elapsed_ms=0, ascii_mode=True, verbose=False)
+        return capsys.readouterr().out
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_cli_ux
+    def test_no_findings_run_names_what_was_left_out(self, capsys: pytest.CaptureFixture[str]) -> None:
+        out = self._no_findings(capsys, excluded_dirs=("docs",), excluded_files=("*.generated.md",))
+        assert "No findings." in out
+        assert "Excluded  docs/, *.generated.md — not checked" in out
+        assert "imported text" not in out
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_cli_ux
+    def test_no_findings_run_with_imported_text_counted(self, capsys: pytest.CaptureFixture[str]) -> None:
+        out = self._no_findings(capsys, excluded_dirs=("docs",), excluded_imported=True)
+        assert "; imported text in checked files still counts" in out
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_cli_ux
+    def test_no_findings_run_with_nothing_left_out_has_no_line(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert "Excluded" not in self._no_findings(capsys)
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_cli_ux
+    @pytest.mark.parametrize(("excluded", "shown"), [((("docs",), ("*.md",)), True), (((), ()), False)])
+    def test_emptied_run_prints_the_record_only_when_present(
+        self, capsys: pytest.CaptureFixture[str], excluded: tuple, shown: bool
+    ) -> None:
+        from types import SimpleNamespace
+
+        from reporails_cli.interfaces.cli.check_notices import _print_excluded_record
+
+        _print_excluded_record(SimpleNamespace(render=SimpleNamespace(excluded=excluded)))  # type: ignore[arg-type]
+        out = capsys.readouterr().out
+        assert ("Excluded  docs/, *.md — not checked" in out) is shown
+        assert "score covers" not in out

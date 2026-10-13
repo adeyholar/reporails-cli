@@ -207,7 +207,9 @@ class TestParseErrorBody:
         assert err is not None
         assert err.error == "scoring_limit_exceeded"
         text = plain_cta(err)
-        assert text.startswith("Project too large to score in one request.")
+        assert text.startswith("Too large to score in one request")
+        assert "one file that holds too many instructions" in text
+        assert "split the largest file into smaller ones" in text
         assert "ails check <path>" not in text
         assert "--exclude-dirs" in text
         assert "exclude_dirs:" in text
@@ -794,7 +796,8 @@ class TestAtomCapRoute:
         err = preflight_oversized(payload, has_api_key=False)
         assert err is not None
         assert err.dense_dirs == (("docs", 4000), ("api", 3500), ("tests", 2500), ("src", 1500))
-        assert err.exclude_route == ("docs", "api")
+        # 6,000 atoms must go: api + tests removes exactly 6,000, less than docs + anything.
+        assert err.exclude_route == ("api", "tests")
         assert _atoms_left(payload, err.exclude_route) <= UNIVERSAL_ATOM_CAP
         assert _atoms_left(payload, err.exclude_route[:1]) > UNIVERSAL_ATOM_CAP
 
@@ -844,18 +847,65 @@ class TestAtomCapRoute:
             err = preflight_oversized(payload, has_api_key=has_key)
             assert err is not None
             cta = plain_cta(err)
-            assert "ails check --exclude-dirs docs --exclude-dirs api" in cta
+            assert "Leave these folders out to get under the cap: api, tests." in cta
             assert "Excluded folders are not checked" in cta
             assert "exclude_dirs:" in cta
             assert "docs (4,000)" in cta
-            assert "ails check <" not in cta
+            assert "ails check" not in cta
+            assert "--exclude-dirs" not in cta
         assert err is not None
         assert err.tier == "pro"
         assert "let us know your use case" in cta
         assert cta.rstrip().endswith("reporails.com/contact/atoms")
-        assert cta.index("--exclude-dirs") < cta.index("let us know your use case")
+        assert cta.index("api, tests") < cta.index("let us know your use case")
         anonymous = plain_cta(preflight_oversized(payload, has_api_key=False))  # type: ignore[arg-type]
         assert "use case" not in anonymous
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_funnel
+    def test_two_small_names_beat_one_large_name(self) -> None:
+        # Excess 100: docs alone removes 3,000, notes + drafts remove 110.
+        spec = [("docs/a.md", 3000), ("notes/b.md", 60), ("drafts/c.md", 50), ("ROOT.md", 6990)]
+        payload = _dense_payload(spec)
+        err = preflight_oversized(payload, has_api_key=False)
+        assert err is not None
+        assert err.exclude_route == ("drafts", "notes")
+        assert _atoms_left(payload, err.exclude_route) <= UNIVERSAL_ATOM_CAP
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_funnel
+    def test_single_name_stays_when_it_is_the_smallest_removal(self) -> None:
+        # Excess 100: notes removes 110; drafts + misc remove 120, more than notes alone.
+        spec = [("notes/b.md", 110), ("drafts/c.md", 60), ("misc/d.md", 60), ("ROOT.md", 9870)]
+        payload = _dense_payload(spec)
+        err = preflight_oversized(payload, has_api_key=False)
+        assert err is not None
+        assert err.exclude_route == ("notes",)
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_funnel
+    def test_route_over_many_names_and_files_is_fast(self) -> None:
+        spec = [(f"d{i}/s{j}/f.md", 2) for i in range(300) for j in range(10)]
+        spec += [("big/f.md", 3000), ("ROOT.md", 1100)]
+        payload = _dense_payload(spec)
+        start = time.perf_counter()
+        err = preflight_oversized(payload, has_api_key=False)
+        elapsed = time.perf_counter() - start
+        assert err is not None
+        assert _atoms_left(payload, err.exclude_route) <= UNIVERSAL_ATOM_CAP
+        assert len(err.exclude_route) <= 4
+        assert elapsed < 0.5
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_funnel
+    def test_command_line_copy_adds_flags_to_the_same_command(self) -> None:
+        err = preflight_oversized(_dense_payload(self._SPEC), has_api_key=False)
+        assert err is not None
+        text = funnel_cta_module.format_cta(err)
+        assert "Run the same command with `--exclude-dirs api --exclude-dirs tests` added to get under the cap." in text
+        assert "ails check" not in text
+        assert "Excluded folders are not checked." in text
+        assert "exclude_dirs:" in text
 
     @pytest.mark.unit
     @pytest.mark.subsys_funnel

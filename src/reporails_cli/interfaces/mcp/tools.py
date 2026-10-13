@@ -62,14 +62,12 @@ def _discover_files(
     rules-only tree with no distinctive main file, reports "nothing to find" exactly as
     the CLI does.
 
-    `target` is the discovery root (a directory). Discovery narrows against the
-    `resolve_agent_filters` `filtered` list — the resolved, exclude-filtered agent set
-    the CLI check flow discovers against — not the raw detected list, so a multi-agent
-    project resolves identically on both surfaces. When `generic_scanning` is on, the
-    `@`-import-reached file fold (`core/pipeline/mapping.py::apply_generic_scan`) runs on
-    the discovered set too, matching the CLI's `_apply_generic_scan`. When `single_file` is
-    given the validated set is narrowed to that one file while agents resolve against
-    `target`. `named` holds files the caller named, which stay in the set whatever is excluded.
+    `target` is the discovery root (a directory). Discovery narrows against the resolved agent
+    set after the exclusions, not the raw detected list. When `generic_scanning` is on, the
+    `@`-import-reached files join the discovered set. When `single_file` is given the validated
+    set is that one file, kept whatever is excluded, while agents resolve against `target`, and
+    `named` is ignored. Otherwise `named` holds files the caller named, which stay in the set
+    whatever is excluded.
     """
     from reporails_cli.core.discovery.agents import get_known_agents
     from reporails_cli.core.pipeline.mapping import apply_generic_scan, discover_scope
@@ -530,8 +528,9 @@ def run_pipeline_for_path(
     """Run the pipeline for `path` (directory or file); returns `(payload, ruleset_map,
     file_score)`. `ruleset_map` and `file_score` are `None` on a structured error/needs-install
     payload — the caller checks `"error"` / `"needs_install"` in the payload, as `validate_tool`
-    does. `named` holds files the caller named, which are checked whatever is excluded; the
-    Excluded record still lists every pattern the user set.
+    does. For a directory `path`, `named` holds files the caller named, which are checked whatever is
+    excluded; the Excluded record still lists every pattern the user set. For a file `path` only that
+    file is named and `named` is ignored.
     """
     if not is_initialized():
         return _rules_missing_payload(), None, None

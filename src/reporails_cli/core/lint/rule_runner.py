@@ -31,6 +31,7 @@ def _collect_mechanical_findings(
     classified: list[Any],
     scoped: bool = False,
     project_checks: str = "all",
+    exclusions: RunExclusions | None = None,
 ) -> list[LocalFinding]:
     """Run mechanical checks and convert Violations to LocalFinding."""
     from reporails_cli.core.lint.mechanical.runner import run_mechanical_checks
@@ -40,7 +41,7 @@ def _collect_mechanical_findings(
     mechanical_rules = {k: v for k, v in rules.items() if v.execution == Execution.LOCAL}
     findings: list[LocalFinding] = []
     for v in run_mechanical_checks(
-        mechanical_rules, project_dir, classified, scoped=scoped, project_checks=project_checks
+        mechanical_rules, project_dir, classified, scoped=scoped, project_checks=project_checks, exclusions=exclusions
     ):
         file_path = v.location.rsplit(":", 1)[0] if ":" in v.location else v.location
         line = 0
@@ -198,7 +199,9 @@ def run_m_probes(
 
     findings: list[LocalFinding] = []
     findings.extend(
-        _collect_mechanical_findings(rules, project_dir, classified, scoped=scoped, project_checks=project_checks)
+        _collect_mechanical_findings(
+            rules, project_dir, classified, scoped=scoped, project_checks=project_checks, exclusions=exclusions
+        )
     )
     if project_checks != "only":
         findings.extend(_collect_deterministic_findings(rules, project_dir, effective_files, classified))
@@ -238,7 +241,11 @@ def _project_wide_findings(
     findings: list[LocalFinding] = []
     for skipped_agents, group in groups.items():
         files = [cf for owner, cf in seen.values() if owner not in skipped_agents]
-        findings.extend(_collect_mechanical_findings(group, project_dir, files, scoped=scoped, project_checks="only"))
+        findings.extend(
+            _collect_mechanical_findings(
+                group, project_dir, files, scoped=scoped, project_checks="only", exclusions=exclusions
+            )
+        )
     return findings
 
 

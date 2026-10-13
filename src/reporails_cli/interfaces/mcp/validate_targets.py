@@ -52,8 +52,7 @@ def resolve_validate_targets(tokens: tuple[str, ...], scan_root: Path) -> tuple[
         get_project_config(scan_root).default_agent,
         detect_agents(scan_root),
         scan_root,
-        list(exclusions.dirs),
-        list(exclusions.files),
+        exclusions,
     )
     token_agent = sniff_agent("", scan_root)
     files: set[Path] = set()

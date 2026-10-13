@@ -299,6 +299,17 @@ def test_referenced_listing_honors_a_flag_folder(project: Path) -> None:
 
 
 @pytest.mark.unit
+def test_a_referenced_target_checks_the_file_no_agent_lists(project: Path) -> None:
+    (project / "ext").mkdir()
+    (project / "ext" / "x.md").write_text("# X\n", "utf-8")
+    (project / "CLAUDE.md").write_text("# Project\n\nSee [x](ext/x.md).\n", "utf-8")
+    _config(project, "generic_scanning: true\n")
+    state = _scope(project, ["referenced"])
+    assert state is not None
+    assert _names(state) == {"x.md"}
+
+
+@pytest.mark.unit
 @pytest.mark.subsys_cli_ux
 def test_naming_a_file_in_an_excluded_folder_beside_the_main_file_checks_both(project: Path) -> None:
     (project / "ext").mkdir()

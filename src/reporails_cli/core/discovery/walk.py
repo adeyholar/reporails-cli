@@ -22,7 +22,6 @@ from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
-from reporails_cli.core.platform.policy.exclusion import excluded_by_name
 from reporails_cli.core.platform.utils.utils import brace_alternatives, glob_matches
 
 logger = logging.getLogger(__name__)
@@ -159,7 +158,7 @@ def _descend_real(
     only a symlink pays for a path resolution; resolving every directory on a large tree
     cost seconds per walk.
     """
-    if excluded_by_name((entry.name,), exclude_dirs) or not entry.is_dir:
+    if entry.name in exclude_dirs or not entry.is_dir:
         return None
     try:
         real = os.path.realpath(entry.path) if entry.is_symlink else os.path.join(parent_real, entry.name)
