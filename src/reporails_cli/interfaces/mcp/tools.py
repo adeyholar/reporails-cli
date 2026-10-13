@@ -90,7 +90,7 @@ def _discover_files(
         None,
         None,
         scan_files=single_file is None,
-        named=named | {single_file} if single_file is not None else named,
+        named=frozenset({single_file}) if single_file is not None else named,
     )
     instruction_files = [safe_resolve(single_file)] if single_file is not None else found.files
     if not instruction_files:

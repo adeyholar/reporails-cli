@@ -44,3 +44,15 @@ def test_single_file_pass_names_the_file_and_lists_nothing(tmp_path: Path) -> No
     assert not found.exclusions.leaves_out(skill)
     assert found.files == []
     assert found.excluded == ((), ())
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_lint
+def test_mcp_single_file_run_names_only_the_file(tmp_path: Path) -> None:
+    project, skill = _project(tmp_path)
+    clear_agent_cache()
+    single = project / "CLAUDE.md"
+    *_, exclusions = tools._discover_files(project, single_file=single, named=frozenset({skill}))
+    assert exclusions is not None
+    assert exclusions.named == frozenset({single.resolve()})
+    assert exclusions.leaves_out(skill)

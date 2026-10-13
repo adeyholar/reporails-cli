@@ -8,7 +8,7 @@
 ### Changed
 
 - Check: file patterns you leave out with `--exclude-files` now add to the `exclude_files:` patterns in your config instead of replacing them, the same way `--exclude-dirs` adds to `exclude_dirs:`.
-- Check: a file or capability you name on the command line (`ails check docs/a.md`, `ails check skills:backlog`) or validate on its own through MCP is checked even inside a folder you left out and counts toward your level; it is no longer listed on the `Excluded` line, and text a checked file imports from it is not reported as imported from a left-out file.
+- Check: a file or capability you name on the command line (`ails check docs/a.md`, `ails check skills:backlog`) or validate on its own through MCP (only that file, not other targets in the same call) is checked even inside a folder you left out and counts toward your level; it is no longer listed on the `Excluded` line, and text a checked file imports from it is not reported as imported from a left-out file.
 - Check: with `generic_scanning: true`, a file or folder you leave out is no longer checked through an `@` import or a link.
 - Check: text a checked file imports with `@path` from a file you left out still counts inside the importing file, and the `Excluded` line ends with `; imported text in checked files still counts`. `ails check -f json` and the MCP `validate` reply carry `imported_text_counted` under `excluded`; it is `false` when no import crosses into a left-out file.
 - Check: a capability you leave out, by folder name (`--exclude-dirs skills`) or by file pattern (`--exclude-files '.claude/skills/**'`), is no longer counted as present, so it no longer raises your level; a file you name on the command line still counts.
