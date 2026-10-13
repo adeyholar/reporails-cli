@@ -96,7 +96,9 @@ class TestStructuredOutput:
             "stats": {"score": 7.4},
             "files": {"CLAUDE.md": {"count": 1, "findings": [{"rule": "CORE:C:0001", "line": 1}]}},
         }
-        monkeypatch.setattr(server, "run_pipeline_for_path", lambda path, full=False: (dict(payload), None, None))
+        monkeypatch.setattr(
+            server, "run_pipeline_for_path", lambda path, full=False, named=frozenset(): (dict(payload), None, None)
+        )
 
         result = _run_async(server.server.call_tool("validate", {"path": str(tmp_path)}))
 
@@ -356,7 +358,9 @@ class TestValidateTargets:
         from reporails_cli.interfaces.mcp import server
 
         server._validate_states.clear()
-        monkeypatch.setattr(server, "run_pipeline_for_path", lambda path, full=False: (self._PAYLOAD, None, None))
+        monkeypatch.setattr(
+            server, "run_pipeline_for_path", lambda path, full=False, named=frozenset(): (self._PAYLOAD, None, None)
+        )
         return _skills_project(tmp_path)
 
     @pytest.mark.e2e
@@ -734,7 +738,9 @@ class TestCircuitBreaker:
                 ],
             },
         }
-        monkeypatch.setattr(server, "run_pipeline_for_path", lambda path, full=False: (payload, None, None))
+        monkeypatch.setattr(
+            server, "run_pipeline_for_path", lambda path, full=False, named=frozenset(): (payload, None, None)
+        )
         claude_md = tmp_path / "CLAUDE.md"
         claude_md.write_text("# Project\n")
 
@@ -790,9 +796,9 @@ class TestFullMemoization:
         calls = {"n": 0}
         real_run_pipeline_for_path = server.run_pipeline_for_path
 
-        def counting_run_pipeline_for_path(path: str, full: bool = False):
+        def counting_run_pipeline_for_path(path: str, full: bool = False, named: frozenset[Path] = frozenset()):
             calls["n"] += 1
-            return real_run_pipeline_for_path(path, full)
+            return real_run_pipeline_for_path(path, full, named)
 
         monkeypatch.setattr(server, "run_pipeline_for_path", counting_run_pipeline_for_path)
 
@@ -1171,7 +1177,9 @@ class TestRemedyBrief:
     def test_a_brief_for_an_unknown_location_is_a_structured_error(self, monkeypatch, tmp_path: Path) -> None:
         from reporails_cli.interfaces.mcp import server
 
-        monkeypatch.setattr(server, "run_pipeline_for_path", lambda path, full=False: (self._payload(), None, None))
+        monkeypatch.setattr(
+            server, "run_pipeline_for_path", lambda path, full=False, named=frozenset(): (self._payload(), None, None)
+        )
         (tmp_path / "CLAUDE.md").write_text("# Project\n")
         _call_tool("validate", {"path": str(tmp_path)})
 
@@ -1189,7 +1197,9 @@ class TestRemedyBrief:
         from reporails_cli.interfaces.mcp import server, tools
 
         fake_map = SimpleNamespace(atoms=(), files=())
-        monkeypatch.setattr(server, "run_pipeline_for_path", lambda path, full=False: (self._payload(), None, None))
+        monkeypatch.setattr(
+            server, "run_pipeline_for_path", lambda path, full=False, named=frozenset(): (self._payload(), None, None)
+        )
         monkeypatch.setattr(tools, "run_pipeline_for_path", lambda path, full=False: ({"files": {}}, fake_map, None))
         (tmp_path / "CLAUDE.md").write_text("# Project\n")
         _call_tool("validate", {"path": str(tmp_path)})
@@ -1213,7 +1223,9 @@ class TestRemedyBrief:
         from reporails_cli.interfaces.mcp import server, tools
 
         fake_map = SimpleNamespace(atoms=(), files=())
-        monkeypatch.setattr(server, "run_pipeline_for_path", lambda path, full=False: (self._payload(), None, None))
+        monkeypatch.setattr(
+            server, "run_pipeline_for_path", lambda path, full=False, named=frozenset(): (self._payload(), None, None)
+        )
         monkeypatch.setattr(tools, "run_pipeline_for_path", lambda path, full=False: ({"files": {}}, fake_map, None))
         (tmp_path / "CLAUDE.md").write_text("# Project\n")
         _call_tool("validate", {"path": str(tmp_path)})
@@ -1313,9 +1325,9 @@ class TestPreservationWiring:
         calls = {"n": 0}
         real_run_pipeline_for_path = server.run_pipeline_for_path
 
-        def counting_run_pipeline_for_path(path: str, full: bool = False):
+        def counting_run_pipeline_for_path(path: str, full: bool = False, named: frozenset[Path] = frozenset()):
             calls["n"] += 1
-            return real_run_pipeline_for_path(path, full)
+            return real_run_pipeline_for_path(path, full, named)
 
         monkeypatch.setattr(server, "run_pipeline_for_path", counting_run_pipeline_for_path)
 
@@ -1686,7 +1698,7 @@ class TestFeedbackNewKinds:
         }
         replies = iter([(project_payload, None, 5.0), (file_payload, None, 5.0)])
         monkeypatch.setattr(server, "model_not_ready_error", lambda: None)
-        monkeypatch.setattr(server, "run_pipeline_for_path", lambda path, full=False: next(replies))
+        monkeypatch.setattr(server, "run_pipeline_for_path", lambda path, full=False, named=frozenset(): next(replies))
         monkeypatch.setattr(snapshots, "has_snapshot", lambda p: True)
 
         _call_tool("validate", {"path": str(tmp_path)})
@@ -1774,7 +1786,7 @@ class TestFeedbackFiredBefore:
         target.write_text("# Project\n\nNever commit secrets.\n")
         replies = iter([(project_payload, None, 5.0), (file_payload, None, 5.0)])
         monkeypatch.setattr(server, "model_not_ready_error", lambda: None)
-        monkeypatch.setattr(server, "run_pipeline_for_path", lambda path, full=False: next(replies))
+        monkeypatch.setattr(server, "run_pipeline_for_path", lambda path, full=False, named=frozenset(): next(replies))
         monkeypatch.setattr(snapshots, "has_snapshot", lambda p: True)
         _call_tool("validate", {"path": str(tmp_path)})
         target.write_text("# Project\n\nNever commit secrets.\n\nedited\n")

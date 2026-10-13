@@ -69,19 +69,30 @@ def test_two_distinctive_agents_each_run_their_own_rules_never_generic(
         scoped: bool = False,
         project_checks: str = "all",
         skills: Mapping[str, str] | None = None,
+        exclusions: object = None,
     ):
         # The one whole-project pass (project-wide checks only) is not a per-agent pass.
         if project_checks != "only":
             m_probe_calls.append((agent, tuple(sorted(f.name for f in instruction_files))))
         return real_m_probes(
-            project_dir, instruction_files, agent=agent, scoped=scoped, project_checks=project_checks, skills=skills
+            project_dir,
+            instruction_files,
+            agent=agent,
+            scoped=scoped,
+            project_checks=project_checks,
+            skills=skills,
+            exclusions=exclusions,
         )
 
     def _spy_content_checks(
-        ruleset_map: object, project_dir: Path, instruction_files: list[Path] | None = None, agent: str = ""
+        ruleset_map: object,
+        project_dir: Path,
+        instruction_files: list[Path] | None = None,
+        agent: str = "",
+        exclusions: object = None,
     ):
         content_calls.append((agent, tuple(sorted(f.name for f in (instruction_files or [])))))
-        return real_content_checks(ruleset_map, project_dir, instruction_files, agent=agent)
+        return real_content_checks(ruleset_map, project_dir, instruction_files, agent=agent, exclusions=exclusions)
 
     monkeypatch.setattr(rule_runner, "run_m_probes", _spy_m_probes)
     monkeypatch.setattr(rule_runner, "run_content_quality_checks", _spy_content_checks)

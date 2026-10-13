@@ -29,7 +29,9 @@ _WORKFLOW = {
 
 def _call(tmp_path: Path, monkeypatch, payload: dict[str, Any], **arguments: Any):
     server._validate_states.clear()
-    monkeypatch.setattr(server, "run_pipeline_for_path", lambda path, full=False: (dict(payload), None, None))
+    monkeypatch.setattr(
+        server, "run_pipeline_for_path", lambda path, full=False, named=frozenset(): (dict(payload), None, None)
+    )
     return asyncio.run(server.server.call_tool("validate", {"path": str(tmp_path), **arguments}))
 
 
@@ -100,7 +102,9 @@ def test_preservation_reply_is_one_text_block(tmp_path: Path, monkeypatch) -> No
 @pytest.mark.subsys_server
 def test_notice_appears_in_the_first_view_only(tmp_path: Path, monkeypatch) -> None:
     payload = {**_paid(), "notices": [{"id": "pay", "level": "warn", "text": "Payment failed", "url": ""}]}
-    monkeypatch.setattr(server, "run_pipeline_for_path", lambda path, full=False: (dict(payload), None, None))
+    monkeypatch.setattr(
+        server, "run_pipeline_for_path", lambda path, full=False, named=frozenset(): (dict(payload), None, None)
+    )
     server._validate_states.clear()
     first = asyncio.run(server.server.call_tool("validate", {"path": str(tmp_path)}))
     (tmp_path / "CLAUDE.md").write_text("# changed\n", encoding="utf-8")

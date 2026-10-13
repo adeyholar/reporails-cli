@@ -28,3 +28,5 @@
 ### Removed
 
 ### Internal
+
+- Tests: the integration and MCP test doubles accept the exclusions a run passes through.

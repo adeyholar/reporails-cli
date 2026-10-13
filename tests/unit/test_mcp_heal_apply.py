@@ -43,7 +43,9 @@ def _call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_workflow: bool =
         payload["workflow"] = _wire(tmp_path, m, ((3, "unbold", "bold"), (7, "code", "format")))
     server._validate_states.clear()
     monkeypatch.setattr(server, "model_not_ready_error", lambda: None)
-    monkeypatch.setattr(server, "run_pipeline_for_path", lambda p, full=False: (dict(payload), m, None))
+    monkeypatch.setattr(
+        server, "run_pipeline_for_path", lambda p, full=False, named=frozenset(): (dict(payload), m, None)
+    )
     result = asyncio.run(server.server.call_tool("heal_apply", {"path": str(tmp_path)}))
     assert len(result.content) == 1 and result.structured_content is None
     return result.content[0].text  # type: ignore[no-any-return]
