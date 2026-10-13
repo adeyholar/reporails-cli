@@ -8,12 +8,31 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import click
 import typer
 from rich.console import Console
+from typer.core import TyperGroup
+
+from reporails_cli.core.discovery.exclusions import FolderValueError
 
 logger = logging.getLogger(__name__)
 
+
+class _AilsGroup(TyperGroup):
+    """The `ails` command group: a folder value the run cannot read ends the command with one error line."""
+
+    def invoke(self, ctx: click.Context) -> Any:
+        try:
+            return super().invoke(ctx)
+        except FolderValueError as exc:
+            Console(stderr=True, emoji=False, highlight=False).print(
+                f"[red]Error:[/red] {exc}", markup=True, soft_wrap=True
+            )
+            raise typer.Exit(2) from exc
+
+
 app = typer.Typer(
+    cls=_AilsGroup,
     name="ails",
     help=("what ails your repo? Let's find out!\n\nrun `ails check` to diagnose your project's instructions"),
     no_args_is_help=True,

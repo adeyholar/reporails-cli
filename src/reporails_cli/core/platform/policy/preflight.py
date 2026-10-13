@@ -184,6 +184,11 @@ def _files_by_name(per_file: dict[str, int]) -> dict[str, set[str]]:
     return by_name
 
 
+def _weight(paths: set[str], per_file: dict[str, int]) -> int:
+    """The atoms in `paths`."""
+    return sum(per_file[path] for path in paths)
+
+
 def _route(by_name: dict[str, set[str]], per_file: dict[str, int], excess: int) -> tuple[str, ...]:
     """The folder names (in name order) whose combined removal is the smallest that takes out `excess` atoms.
 
@@ -194,7 +199,7 @@ def _route(by_name: dict[str, set[str]], per_file: dict[str, int], excess: int) 
     """
 
     def weight(paths: set[str]) -> int:
-        return sum(per_file[path] for path in paths)
+        return _weight(paths, per_file)
 
     removal = {name: weight(paths) for name, paths in by_name.items()}
     if weight(set().union(*by_name.values())) < excess:
@@ -233,11 +238,7 @@ def _greedy_route(by_name: dict[str, set[str]], per_file: dict[str, int], excess
     left = excess
     while left > 0:
         gain, best = min(
-            (
-                (sum(per_file[path] for path in paths - covered), name)
-                for name, paths in by_name.items()
-                if name not in chosen
-            ),
+            ((_weight(paths - covered, per_file), name) for name, paths in by_name.items() if name not in chosen),
             key=lambda item: (-item[0], item[1]),
         )
         if gain <= 0:

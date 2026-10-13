@@ -36,6 +36,16 @@ def _resolve_one_target(
     return set(), set()
 
 
+def _exclusions_or_error(scan_root: Path) -> Any:
+    """The run's exclusions at `scan_root`, or an error payload when a folder value is unreadable."""
+    from reporails_cli.core.discovery.exclusions import FolderValueError, load_run_exclusions
+
+    try:
+        return load_run_exclusions(scan_root)
+    except FolderValueError as exc:
+        return {"error": str(exc)}
+
+
 def resolve_validate_targets(tokens: tuple[str, ...], scan_root: Path) -> tuple[set[Path], set[Path]] | dict[str, Any]:
     """The files and directories `tokens` name under `scan_root`, read the way `ails check` reads
     its targets (`skills`, `skills:<name>`, `agents:<name>`, `@main`, a path; a typed word such
@@ -43,11 +53,12 @@ def resolve_validate_targets(tokens: tuple[str, ...], scan_root: Path) -> tuple[
     `(files, dirs)` — every path resolved — or a `target_not_found` error payload."""
     from reporails_cli.core.classify.capability_paths import sniff_agent
     from reporails_cli.core.discovery.agents import detect_agents
-    from reporails_cli.core.discovery.exclusions import load_run_exclusions
     from reporails_cli.core.pipeline.mapping import resolve_agent_filters
     from reporails_cli.core.platform.config.config import get_project_config
 
-    exclusions = load_run_exclusions(scan_root)
+    exclusions = _exclusions_or_error(scan_root)
+    if isinstance(exclusions, dict):
+        return exclusions
     effective_agent, _, _, _ = resolve_agent_filters(
         get_project_config(scan_root).default_agent,
         detect_agents(scan_root),
