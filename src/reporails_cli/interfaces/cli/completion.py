@@ -7,24 +7,7 @@ once per shell to register them.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from functools import wraps
 from pathlib import Path
-
-from reporails_cli.core.discovery.exclusions import FolderValueError
-
-
-def _no_candidates_on_bad_folder(fn: Callable[[str], list[str]]) -> Callable[[str], list[str]]:
-    """A completion that offers nothing, rather than an error, when a folder value in the config is unreadable."""
-
-    @wraps(fn)
-    def wrapper(incomplete: str) -> list[str]:
-        try:
-            return fn(incomplete)
-        except FolderValueError:
-            return []
-
-    return wrapper
 
 
 def complete_rule_token(incomplete: str) -> list[str]:
@@ -41,7 +24,6 @@ def complete_rule_token(incomplete: str) -> list[str]:
     return sorted(out)
 
 
-@_no_candidates_on_bad_folder
 def complete_capability(incomplete: str) -> list[str]:
     """Complete a capability keyword for the currently-detected agent."""
     from reporails_cli.core.classify.capability_paths import available_capabilities
@@ -63,7 +45,6 @@ def complete_agent(incomplete: str) -> list[str]:
     return sorted(a for a in list_known_agents() if a.startswith(incomplete))
 
 
-@_no_candidates_on_bad_folder
 def complete_target_token(incomplete: str) -> list[str]:
     """Complete a target token for `ails check`: bare capability, `capability:name`, or path prefix.
 

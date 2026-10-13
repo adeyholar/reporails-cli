@@ -105,13 +105,13 @@ When you cross an hourly limit, the normal output is replaced at the bottom of `
 
 The same shape renders for `payload_too_large`.
 
-The 10,000-atom cap is the same on every plan, so its message gives a route instead of an upgrade: the densest folders with their atom counts and one ready command that leaves out enough of them for the rest of the project to be checked and scored. Excluded folders are not checked; list them under `exclude_dirs:` in `.ails/config.yml` to keep them out on every run. Pro also gets the contact link:
+The 10,000-atom cap is the same on every plan, so its message gives a route instead of an upgrade: the densest folders with their atom counts and the folders to add with `--exclude-dirs` to the command you ran, the smallest set that leaves the rest of the project under the cap. In `-f json` and the MCP reply it names the folders and the `exclude_dirs:` setting instead. Excluded folders are not checked; list them under `exclude_dirs:` in `.ails/config.yml` to keep them out on every run. Pro also gets the contact link:
 
 ```
   ⚠  Server diagnostics unavailable.
   Project too dense (11,395 atoms, 10,000 cap). The cap is the same on every plan.
   Densest folders, in atoms: .claude/skills (9,291), .claude/agents (2,033).
-  Leave these out to get under the cap: `ails check --exclude-dirs agents`
+  Run the same command with `--exclude-dirs agents` added to get under the cap.
   Excluded folders are not checked.
   Add them to `exclude_dirs:` in `.ails/config.yml` to skip them on every run.
 ```
