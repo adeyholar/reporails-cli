@@ -60,7 +60,10 @@ def discover_scope(
     exclusions = load_run_exclusions(target, exclude_dirs, exclude_files)
     detected, resolved, files = _scan(target, agent, exclusions, scan_files)
     found = ScopeDiscovery(detected, *resolved, files, exclusions.record() if scan_files else ((), ()), exclusions)
-    return with_named(found, named) if scan_files and named else found
+    if scan_files:
+        return with_named(found, named) if named else found
+    # A single-file pass lists and records nothing, yet its named paths stay in the run.
+    return found._replace(exclusions=exclusions.with_named(sorted(named))) if named else found
 
 
 def with_named(found: ScopeDiscovery, paths: Iterable[Path], *, narrowed: bool = False) -> ScopeDiscovery:

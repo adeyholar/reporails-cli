@@ -246,7 +246,7 @@ class _SurfaceScan:
         return self.hook_configs[path]
 
     def keep(self, paths: list[Path]) -> list[Path]:
-        """`paths` without the files the run leaves out, (a file the user named is never left out)."""
+        """`paths` without the files the run leaves out (a file the user named is never left out)."""
         if self.exclusions is None:
             return paths
         return [p for p in paths if not self.exclusions.leaves_out(p)]

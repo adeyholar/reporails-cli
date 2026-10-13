@@ -84,7 +84,14 @@ def _discover_files(
     # the whole-project scan can legitimately come up with nothing to lint. The whole-project
     # scan includes each agent's config surfaces (hooks, permissions, MCP declarations, plugin
     # manifests) alongside its instruction and rule files, matching `ails check`'s own scope.
-    found = discover_scope(target, config.default_agent, None, None, scan_files=single_file is None, named=named)
+    found = discover_scope(
+        target,
+        config.default_agent,
+        None,
+        None,
+        scan_files=single_file is None,
+        named=named | {single_file} if single_file is not None else named,
+    )
     instruction_files = [safe_resolve(single_file)] if single_file is not None else found.files
     if not instruction_files:
         from reporails_cli.formatters.json import empty_result_payload

@@ -234,7 +234,8 @@ def _resolve_scope_at_target(state: CheckState) -> None:
         _validate_agent(agent_arg, console)
     # A single file is checked whatever is excluded, so its pass lists nothing and records nothing.
     flags = (state.inputs.exclude_dirs, state.inputs.exclude_files)
-    found = discover_scope(state.targets.target, agent_arg, *flags, scan_files=state.targets.single_file is None)
+    named = frozenset(filter(None, [state.targets.single_file]))
+    found = discover_scope(state.targets.target, agent_arg, *flags, scan_files=not named, named=named)
     state.render.excluded, state.scope.exclusions = found.excluded, found.exclusions
     state.scope.detected, state.scope.filtered = found.detected, found.filtered
     state.scope.effective_agent, state.scope.assumed, state.scope.mixed = (
@@ -245,7 +246,6 @@ def _resolve_scope_at_target(state: CheckState) -> None:
     state.scope.instruction_files = found.files
     if state.targets.single_file is not None:
         state.scope.instruction_files = [safe_resolve(state.targets.single_file)]
-        state.scope.exclusions = found.exclusions and found.exclusions.with_named([state.targets.single_file])
     elif state.targets.target != state.inputs.project_root:
         state.scope.instruction_files = [
             f for f in state.scope.instruction_files if _file_under_target(f, state.targets.target)
