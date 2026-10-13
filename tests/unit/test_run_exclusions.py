@@ -65,7 +65,7 @@ def test_leaves_out_tests_user_patterns_only(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 @pytest.mark.subsys_map
-def test_leaves_out_logical_resolved_and_symlinked_root(tmp_path: Path) -> None:
+def test_leaves_out_logical_resolved_and_symlinked_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     real = tmp_path / "real"
     (real / "ext").mkdir(parents=True)
     link = tmp_path / "link"
@@ -76,7 +76,8 @@ def test_leaves_out_logical_resolved_and_symlinked_root(tmp_path: Path) -> None:
     assert RunExclusions(root=real.resolve(), dirs=frozenset({"ext"})).leaves_out(link / "ext" / "x.md")
     # Glob form through the link.
     assert RunExclusions(root=link, files=("ext/*.md",)).leaves_out((real / "ext" / "x.md").resolve())
-    # Relative logical path against an absolute root's cwd-independent form.
+    # Relative logical path against an absolute root's cwd-independent form (cwd on the same drive).
+    monkeypatch.chdir(tmp_path)
     assert RunExclusions(root=real, dirs=frozenset({"ext"})).leaves_out(Path(os.path.relpath(real / "ext" / "x.md")))
 
 

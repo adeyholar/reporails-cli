@@ -90,7 +90,7 @@ def test_whole_project_run_with_a_named_file_keeps_the_left_out_folder_in_the_re
     named = frozenset({project / "packages" / "x" / "CLAUDE.md"})
     discovered = tools._discover_files(project, named=named)
     assert isinstance(discovered, tuple)
-    files = {str(f.relative_to(project)) for f in discovered[2]}
+    files = {f.relative_to(project).as_posix() for f in discovered[2]}
     assert "packages/x/CLAUDE.md" in files
     assert "packages/y/CLAUDE.md" not in files
     assert discovered[4] == (("packages",), ())
