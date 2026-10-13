@@ -491,3 +491,18 @@ class TestCombinedAnnotationsNotices:
         lines = output.split("\n")
         assert lines[0] == "::warning title=reporails::Payment failed%0Afix it 100%25 https://example.test/pay"
         assert lines[1] == "::notice title=reporails::Pro ends soon"
+
+    @pytest.mark.unit
+    @pytest.mark.subsys_cli_ux
+    def test_a_promo_gets_no_annotation_and_the_rest_are_unchanged(self) -> None:
+        from reporails_cli.core.platform.dto.diagnostics import Notice
+
+        notices = (
+            Notice("ad", "info", "Fixture promo", "https://example.test/h", kind="promo"),
+            Notice("ad2", "warn", "Loud", kind="promo"),
+            Notice("pro", "info", "Pro ends soon", ""),
+        )
+        output = github_formatter.format_combined_annotations(_combined_result(notices=notices))
+        lines = output.split("\n")
+        assert lines[0] == "::notice title=reporails::Pro ends soon"
+        assert [line for line in lines if line.startswith("::")] == [lines[0]]

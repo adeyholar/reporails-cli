@@ -31,6 +31,7 @@ from reporails_cli.core.discovery.agents import (
     get_all_instruction_files,
     get_known_agents,
 )
+from reporails_cli.core.discovery.exclusions import RunExclusions, load_run_exclusions
 from reporails_cli.core.discovery.walk import is_symlink_loop_error, is_under, safe_resolve
 from reporails_cli.core.mapper.classify import CONSTRAINT_WORDS
 from reporails_cli.core.mapper.imports import import_refs
@@ -113,7 +114,11 @@ def _detect_path_scoped_rules(
     return False
 
 
-def detect_features_filesystem(target: Path, agents: list[DetectedAgent] | None = None) -> DetectedFeatures:
+def detect_features_filesystem(
+    target: Path,
+    agents: list[DetectedAgent] | None = None,
+    exclusions: RunExclusions | None = None,
+) -> DetectedFeatures:
     """Detect project features from file structure and content.
 
     Populates DetectedFeatures for capability-gate level detection,
@@ -122,6 +127,7 @@ def detect_features_filesystem(target: Path, agents: list[DetectedAgent] | None 
     Args:
         target: Project root path
         agents: Pre-detected agents (avoids redundant filesystem scan)
+        exclusions: The run's exclusions; a folder or file it leaves out is not counted (default: the project's config)
 
     Returns:
         DetectedFeatures with all capability fields populated
@@ -135,7 +141,7 @@ def detect_features_filesystem(target: Path, agents: list[DetectedAgent] | None 
     # gates on its own declared surfaces.
     resolved_agents = agents if agents is not None else detect_agents(target)
     agent_ids = {a.agent_type.id for a in resolved_agents}
-    scan = _SurfaceScan.for_target(target)
+    scan = _SurfaceScan.for_target(target, exclusions)
 
     # Check for CLAUDE.md at root
     root_claude = target / "CLAUDE.md"
@@ -229,6 +235,7 @@ class _SurfaceScan:
     roots already found, so each plugin marker is searched for once."""
 
     exclude_dirs: frozenset[str]
+    exclusions: RunExclusions | None = None
     roots_by_marker: dict[str, list[Path]] = field(default_factory=dict)
     hook_configs: dict[Path, HookConfig | None] = field(default_factory=dict)
 
@@ -238,11 +245,16 @@ class _SurfaceScan:
             self.hook_configs[path] = read_hook_config(path)
         return self.hook_configs[path]
 
-    @classmethod
-    def for_target(cls, target: Path) -> _SurfaceScan:
-        from reporails_cli.core.discovery.agents import load_project_exclude_dirs
+    def keep(self, paths: list[Path]) -> list[Path]:
+        """`paths` without the files the run leaves out (a file the user named is never left out)."""
+        if self.exclusions is None:
+            return paths
+        return [p for p in paths if not self.exclusions.leaves_out(p)]
 
-        return cls(exclude_dirs=load_project_exclude_dirs(target))
+    @classmethod
+    def for_target(cls, target: Path, exclusions: RunExclusions | None = None) -> _SurfaceScan:
+        exclusions = exclusions or load_run_exclusions(target)
+        return cls(exclude_dirs=exclusions.feature_walk_dirs, exclusions=exclusions)
 
 
 def _scan_for(target: Path, scan: _SurfaceScan | None) -> _SurfaceScan:
@@ -284,7 +296,7 @@ def _agent_surface_files(
     patterns = _surface_patterns(target, spec, scan)
     if not patterns:
         return []
-    return glob_file_type_patterns(target, patterns, _extract_properties(spec), scan.exclude_dirs)
+    return scan.keep(glob_file_type_patterns(target, patterns, _extract_properties(spec), scan.exclude_dirs))
 
 
 def _agent_has_surface(target: Path, agent_id: str, surface_name: str, scan: _SurfaceScan | None = None) -> bool:
@@ -320,7 +332,7 @@ def _hook_scope_matches(target: Path, agent_id: str, scan: _SurfaceScan, *, repo
         patterns = _surface_patterns(
             target, {"scopes": {scope: scope_spec}} if scopes else spec, scan, repo_only=repo_only
         )
-        for match in glob_file_type_patterns(target, patterns, props, scan.exclude_dirs):
+        for match in scan.keep(glob_file_type_patterns(target, patterns, props, scan.exclude_dirs)):
             if match not in seen:
                 seen.add(match)
                 found.append((scope, match))
@@ -408,7 +420,7 @@ def _agent_nested_instruction_files(target: Path, agent_id: str, scan: _SurfaceS
         patterns = _surface_patterns(target, ft, scan)
         if not patterns:
             continue
-        found.extend(glob_file_type_patterns(target, patterns, _extract_properties(ft), scan.exclude_dirs))
+        found.extend(scan.keep(glob_file_type_patterns(target, patterns, _extract_properties(ft), scan.exclude_dirs)))
     return found
 
 

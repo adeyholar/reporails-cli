@@ -22,11 +22,12 @@ from reporails_cli.core.discovery.agents import (
     DetectedAgent,
     clear_agent_cache,
     detect_agents,
-    filter_agents_by_exclude_files,
+    filter_agents_by_exclusions,
     get_all_instruction_files,
     get_all_scannable_files,
     get_known_agents,
 )
+from reporails_cli.core.discovery.exclusions import RunExclusions
 from reporails_cli.core.platform.runtime.engine_helpers import _find_project_root
 
 
@@ -638,7 +639,9 @@ class TestProjectConfigSurfaceAdjustments:
             rule_files=[tmp_path / ".claude" / "rules" / "keep.md", tmp_path / ".claude" / "skills" / "drop.md"],
         )
 
-        filtered = filter_agents_by_exclude_files([agent], tmp_path, [".claude/agents/lead.md", ".claude/skills/**"])
+        filtered = filter_agents_by_exclusions(
+            [agent], RunExclusions(tmp_path, files=(".claude/agents/lead.md", ".claude/skills/**"))
+        )
 
         assert len(filtered) == 1
         inst = {f.as_posix() for f in filtered[0].instruction_files}
@@ -657,7 +660,7 @@ class TestProjectConfigSurfaceAdjustments:
             instruction_files=[tmp_path / ".claude" / "agents" / "lead.md"],
         )
 
-        filtered = filter_agents_by_exclude_files([agent], tmp_path, ["**/lead.md"])
+        filtered = filter_agents_by_exclusions([agent], RunExclusions(tmp_path, files=("**/lead.md",)))
 
         assert filtered == []
 

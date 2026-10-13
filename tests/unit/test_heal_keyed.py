@@ -375,7 +375,7 @@ def test_heal_takes_its_fixes_from_the_workflow_the_report_showed(
         render=SimpleNamespace(
             heal_authed=True, capability_paths=set(), result=SimpleNamespace(notices=(), workflow=shown)
         ),
-        scope=SimpleNamespace(instruction_files=[path], effective_agent="claude"),
+        scope=SimpleNamespace(instruction_files=[path], effective_agent="claude", exclusions=None),
         targets=SimpleNamespace(single_path=None, target=tmp_path, output_format="text"),
     )
     check_flow._flow_heal(state)

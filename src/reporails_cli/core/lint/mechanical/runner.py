@@ -10,6 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from reporails_cli.core.discovery.exclusions import RunExclusions
 from reporails_cli.core.discovery.walk import is_under, shared_dir_listings
 from reporails_cli.core.lint.mechanical.checks import MECHANICAL_CHECKS, get_target_files
 from reporails_cli.core.platform.dto.checks import CheckResult
@@ -28,12 +29,14 @@ def run_mechanical_check(
     classified_files: list[ClassifiedFile],
     extra_args: dict[str, Any] | None = None,
     match_type: str | list[str] | None = None,
+    exclusions: RunExclusions | None = None,
 ) -> CheckResult | None:
     """Run one mechanical check.
 
     `extra_args` (upstream annotations) sit under the check's own `args`, so a check.yml entry
     always wins. `match_type` is the rule's match type; the check scopes to the rule's file
-    targets unless `_targets` is given.
+    targets unless `_targets` is given. `exclusions` is what the run leaves out; the check
+    resolves its file targets under it.
 
     Returns None when the check is `entry_only` and no skill entry file is in scope (nothing to
     judge). Raises `UnknownCheckError` for a check name that is not registered; any exception
@@ -48,6 +51,8 @@ def run_mechanical_check(
     args.update(check.args or {})
     if match_type and "_targets" not in args:
         args["_match_type"] = match_type
+    if exclusions is not None:
+        args["_exclusions"] = exclusions
     if args.get("entry_only") and not get_target_files(args, classified_files, root):
         return None
     result: CheckResult = fn(root, args, classified_files)
@@ -61,6 +66,7 @@ def dispatch_single_check(
     classified_files: list[ClassifiedFile],
     location: str,
     extra_args: dict[str, Any] | None = None,
+    exclusions: RunExclusions | None = None,
 ) -> tuple[Violation | None, CheckResult | None]:
     """Dispatch a single mechanical check and return (violation, raw_result).
 
@@ -74,6 +80,7 @@ def dispatch_single_check(
             the same rule's chain (`discovered_imports`, `discovered_markdown_links`,
             etc.). Merged into `args` below the check's own declared args, so a
             check.yml `args:` entry always wins over an upstream annotation.
+        exclusions: What the run leaves out, handed to the check.
 
     Returns:
         Tuple of (Violation if check failed else None, raw CheckResult or None on error).
@@ -83,7 +90,7 @@ def dispatch_single_check(
 
     match_type = rule.match.type if rule.match is not None else None
     try:
-        result = run_mechanical_check(check, root, classified_files, extra_args, match_type)
+        result = run_mechanical_check(check, root, classified_files, extra_args, match_type, exclusions)
     except UnknownCheckError:
         logger.warning("Unknown mechanical check: %s (rule %s)", check.check, rule.id)
         return None, None
@@ -118,6 +125,7 @@ def run_mechanical_checks(
     classified_files: list[ClassifiedFile],
     scoped: bool = False,
     project_checks: str = "all",
+    exclusions: RunExclusions | None = None,
 ) -> list[Violation]:
     """Run mechanical checks from rules and return violations.
 
@@ -135,12 +143,13 @@ def run_mechanical_checks(
         project_checks: ``"all"`` runs every check; ``"defer"`` skips the project-wide
             checks of core rules (a later whole-project pass runs them once);
             ``"only"`` runs nothing but the project-wide checks.
+        exclusions: What the run leaves out; checks resolve their file targets under it.
 
     Returns:
         List of Violation objects for failed checks
     """
     with shared_dir_listings():
-        return _run_mechanical_checks(rules, target, classified_files, scoped, project_checks)
+        return _run_mechanical_checks(rules, target, classified_files, scoped, project_checks, exclusions)
 
 
 def _run_mechanical_checks(
@@ -149,6 +158,7 @@ def _run_mechanical_checks(
     classified_files: list[ClassifiedFile],
     scoped: bool,
     project_checks: str,
+    exclusions: RunExclusions | None = None,
 ) -> list[Violation]:
     """The check loop of `run_mechanical_checks`, run inside its shared directory listings."""
     from reporails_cli.core.platform.policy.matching import match_files
@@ -175,13 +185,12 @@ def _run_mechanical_checks(
                 continue
             if scoped and check.project_scope == "aggregate":
                 continue
-            project_wide = bool(check.project_scope)
-            if project_checks == "only" and not project_wide:
+            if project_checks == "only" and not check.project_scope:
                 continue
-            if project_checks == "defer" and project_wide and rule.id.startswith("CORE:"):
+            if project_checks == "defer" and check.project_scope and rule.id.startswith("CORE:"):
                 continue
             violation, result = dispatch_single_check(
-                check, rule, target, matched, location, extra_args=accumulated_args
+                check, rule, target, matched, location, extra_args=accumulated_args, exclusions=exclusions
             )
             if violation and result is not None and result.occurrences:
                 violations.extend(replace(violation, location=loc, message=msg) for loc, msg in result.occurrences)

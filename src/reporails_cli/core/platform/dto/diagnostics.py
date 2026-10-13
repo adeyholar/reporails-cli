@@ -36,19 +36,22 @@ def tier_label(tier: str) -> str:
     return tier.capitalize() if tier in ACCOUNT_TIERS else ""
 
 
-# A short message for the user, as the server sends it. `level` is one of NOTICE_LEVELS;
-# `url` is "" when the notice links nowhere.
+# A short message for the user. `level` is one of NOTICE_LEVELS; `kind` is one of
+# NOTICE_KINDS ("promo" is an announcement, "notice" anything else); `url` is "" when
+# the notice links nowhere.
 NOTICE_LEVELS = frozenset({"info", "warn"})
+NOTICE_KINDS = frozenset({"notice", "promo"})
 
 
 @dataclass(frozen=True)
 class Notice:
-    """One message for the user: an id (stable across runs), a level, the text, an optional link."""
+    """One message for the user: an id (stable across runs), a level, the text, an optional link, a kind."""
 
     id: str
     level: str
     text: str
     url: str = ""
+    kind: str = "notice"
 
 
 # Failures that clear by themselves: a busy server, a request that took too long, and the
@@ -337,6 +340,10 @@ class FunnelError:
     support_url: str = ""
     message: str = ""
     status: int | None = None
+    # Over the atom cap: the densest top-level folders with their atom counts, and the folders
+    # whose exclusion brings the project under the cap (empty when no set of folders does).
+    dense_dirs: tuple[tuple[str, int], ...] = ()
+    exclude_route: tuple[str, ...] = ()
 
     @property
     def retryable(self) -> bool:

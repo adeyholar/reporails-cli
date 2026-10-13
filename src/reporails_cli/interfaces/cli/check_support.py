@@ -59,45 +59,6 @@ def _explain_rules_paths(rules: list[str] | None) -> list[Path] | None:
     return None
 
 
-def _generic_scan_file_types(
-    target: Path,
-    instruction_files: list[Path],
-    agent: str,
-    generic_scanning: bool,
-) -> tuple[list[Path], dict[str, str]]:
-    """Classify generic-scanned (link / import-reached) files at the composition root.
-
-    Returns `(import_extra, file_type_by_path)`:
-      - `import_extra` — `@`-import-reached files (`file_type == "generic"`, eagerly auto-loaded)
-        to ADD to the mapped + server-scored set so they earn an Imported quality score.
-        Markdown-`referenced` files are deliberately excluded: the harness never loads them, so
-        folding them into the score would be a false signal — they stay lint-only.
-      - `file_type_by_path` — normalized path -> file_type for ALL generic-scanned files (generic +
-        referenced), so the display routes them to the Imported surface / Referenced panel.
-    No-op (`([], {})`) when generic scanning is off.
-    """
-    if not generic_scanning:
-        return [], {}
-    from reporails_cli.core.classify import classify_files, load_file_types
-    from reporails_cli.core.platform.runtime.merger import normalize_finding_path
-
-    try:
-        file_types = load_file_types(agent, project_root=target)
-        classified = classify_files(target, list(instruction_files), file_types, generic_scanning=True)
-    except (OSError, ValueError) as exc:
-        logger.warning("generic-scan classification skipped: %s", exc)
-        return [], {}
-
-    ft_by_path = {normalize_finding_path(str(cf.path), target): cf.file_type for cf in classified}
-    seen = {normalize_finding_path(str(p), target) for p in instruction_files}
-    import_extra = [
-        cf.path
-        for cf in classified
-        if cf.file_type == "generic" and normalize_finding_path(str(cf.path), target) not in seen
-    ]
-    return import_extra, ft_by_path
-
-
 def _heal_authed(funnel_error: object) -> bool:
     """True when `--heal` may write fixes this run.
 

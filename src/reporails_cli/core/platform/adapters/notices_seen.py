@@ -1,4 +1,9 @@
-"""Which notices are due on this run: a warning always, an info once per local day.
+"""Which notices show on this run: a warning always, anything else once per local day.
+
+An announcement (`kind == "promo"`) shows once per local day whatever its level, and
+`visible_notices` drops announcements when the user opted out (`--no-promo`, or the
+`AILS_NO_PROMO` environment variable on). A notice not marked as an announcement is
+never dropped.
 
 The ids already shown are kept in `~/.reporails/notices-seen.json` as `{id: "YYYY-MM-DD"}`,
 and entries older than 30 days are dropped. Every failure here (unreadable, corrupt or
@@ -13,6 +18,7 @@ import logging
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from reporails_cli.core.platform.config.bootstrap import env_flag
 from reporails_cli.core.platform.dto.diagnostics import Notice
 from reporails_cli.core.platform.utils.utils import write_json_atomic
 
@@ -57,16 +63,28 @@ def _save(entries: dict[str, str]) -> None:
         logger.debug("Could not persist notices-seen: %s", exc)
 
 
+def _every_run(notice: Notice) -> bool:
+    """True for a warning that is not an announcement: it shows on every run."""
+    return notice.level == "warn" and notice.kind != "promo"
+
+
+def visible_notices(notices: tuple[Notice, ...], *, no_promo: bool = False) -> tuple[Notice, ...]:
+    """`notices` without the announcements when `no_promo` is set or `AILS_NO_PROMO` is truthy."""
+    if not (no_promo or env_flag("AILS_NO_PROMO")):
+        return notices
+    return tuple(n for n in notices if n.kind != "promo")
+
+
 def due_notices(notices: tuple[Notice, ...], *, now: datetime | None = None) -> tuple[Notice, ...]:
-    """The notices to show now; the info ones returned are recorded as shown today."""
+    """The notices to show now; the ones that do not show every run are recorded as shown today."""
     if not notices:
         return ()
     today = (now or datetime.now()).astimezone().date()
     stored = _load()
     entries = {k: v for k, v in stored.items() if _recent(v, today - timedelta(days=KEEP_DAYS))}
-    due = tuple(n for n in notices if n.level == "warn" or entries.get(n.id) != today.isoformat())
+    due = tuple(n for n in notices if _every_run(n) or entries.get(n.id) != today.isoformat())
     for notice in due:
-        if notice.level != "warn":
+        if not _every_run(notice):
             entries[notice.id] = today.isoformat()
     if entries != stored:
         _save(entries)

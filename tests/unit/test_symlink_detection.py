@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from reporails_cli.core.discovery.agents import DEFAULT_EXCLUDE_DIRS
+from reporails_cli.core.discovery.exclusions import DEFAULT_EXCLUDE_DIRS
 from reporails_cli.core.discovery.features import (
     detect_features_filesystem,
     resolve_symlinked_files,

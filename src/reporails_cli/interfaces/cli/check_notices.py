@@ -97,11 +97,12 @@ def _emit_empty_run(state: CheckState) -> None:
     human message, which says plainly that nothing was found.
     """
     if state.targets.output_format in ("json", "github"):
+        from reporails_cli.core.pipeline.assemble import with_exclusions
         from reporails_cli.core.platform.runtime.merger import CombinedResult
 
         _dispatch_output(
             state.targets.output_format,
-            CombinedResult(),
+            with_exclusions(CombinedResult(), state.render.excluded),
             None,
             0.0,
             set(),
@@ -117,3 +118,16 @@ def _emit_empty_run(state: CheckState) -> None:
     )
     others = state.scope.detected if whole_project and _agent_is_pinned(state) else None
     _print_no_instruction_files(state.scope.effective_agent, console, others)
+    _print_excluded_record(state)
+
+
+def _print_excluded_record(state: CheckState) -> None:
+    """Name the folders and files the user left out under the no-files message; nothing when none were."""
+    dirs, files = state.render.excluded
+    if not (dirs or files):
+        return
+    from reporails_cli.core.pipeline.assemble import with_exclusions
+    from reporails_cli.core.platform.runtime.merger import CombinedResult
+    from reporails_cli.formatters.text.verdict import render_excluded_line
+
+    render_excluded_line(with_exclusions(CombinedResult(), state.render.excluded), scored=False)

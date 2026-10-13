@@ -138,6 +138,14 @@ class CombinedResult:
     # The hooks found in the project's agent hook configs, set by the assemble spine from the
     # features it already computes for the level; empty for a hand-built result.
     hooks: tuple[HookEntry, ...] = ()
+    # The `(rule id, project-relative file)` pairs whose check did not finish in time, so says
+    # nothing about that file; empty when every check finished.
+    not_evaluated: tuple[tuple[str, str], ...] = ()
+    # The folders and file globs the user left out of the run (built-in default excludes are not listed).
+    excluded_dirs: tuple[str, ...] = ()
+    excluded_files: tuple[str, ...] = ()
+    # True when a checked file imports text from a file the user left out; that text still counts there.
+    excluded_imported: bool = False
 
 
 def _collect_server_diagnostics(

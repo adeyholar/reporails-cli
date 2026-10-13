@@ -9,7 +9,6 @@ from typing import Any
 
 import regex as re
 
-from reporails_cli.core.discovery.agent_discovery import is_excluded
 from reporails_cli.core.discovery.agents import load_project_exclude_dirs
 from reporails_cli.core.discovery.walk import safe_resolve, walk_files, walk_markdown
 from reporails_cli.core.lint.regex.compiler import (
@@ -18,9 +17,10 @@ from reporails_cli.core.lint.regex.compiler import (
     CompiledRuleSet,
     compile_rules,
 )
+from reporails_cli.core.lint.regex.not_evaluated import PatternTimeoutError, record_not_evaluated, rule_id_of
 from reporails_cli.core.mapper.imports import expand_imports_with_origins
 from reporails_cli.core.platform.dto.models import LocalFinding
-from reporails_cli.core.platform.utils.utils import glob_matches, matches_any_glob, strip_frontmatter
+from reporails_cli.core.platform.utils.utils import glob_matches, strip_frontmatter
 
 logger = logging.getLogger(__name__)
 
@@ -92,12 +92,32 @@ _REGEX_TIMEOUT_S = 0.5
 
 
 def _safe_search(pat: re.Pattern[str], content: str) -> re.Match[str] | None:
-    """Run pat.search with the regex library's native timeout against catastrophic backtracking."""
+    """Run pat.search with the regex library's native timeout; raises `PatternTimeoutError` when it runs out."""
     try:
         return pat.search(content, timeout=_REGEX_TIMEOUT_S)
-    except TimeoutError:
+    except TimeoutError as exc:
         logger.warning("Regex search timed out after %.1fs: %s", _REGEX_TIMEOUT_S, pat.pattern[:80])
-        return None
+        raise PatternTimeoutError(pat.pattern[:80]) from exc
+
+
+def _any_of_matches(patterns: tuple[re.Pattern[str], ...], content: str) -> list[re.Match[str]]:
+    """The first match of each pattern that has one; a pattern that runs out of time is skipped.
+
+    Raises `PatternTimeoutError` only when nothing matched and some pattern ran out of time.
+    """
+    matches: list[re.Match[str]] = []
+    timed_out: PatternTimeoutError | None = None
+    for pat in patterns:
+        try:
+            m = _safe_search(pat, content)
+        except PatternTimeoutError as exc:
+            timed_out = exc
+            continue
+        if m:
+            matches.append(m)
+    if not matches and timed_out is not None:
+        raise timed_out
+    return matches
 
 
 def _match_check(
@@ -114,7 +134,7 @@ def _match_check(
     if check.body_only:
         content = body_content if body_content is not None else strip_frontmatter(content, keep_lines=True)
     if check.either_patterns:
-        return [m for pat in check.either_patterns if (m := _safe_search(pat, content))]
+        return _any_of_matches(check.either_patterns, content)
 
     matches = []
     for pat in check.patterns:
@@ -146,10 +166,13 @@ def _every_match(
         return first
     if check.body_only:
         content = body_content if body_content is not None else strip_frontmatter(content, keep_lines=True)
-    found = sorted(
-        (m for pat in (check.either_patterns or check.patterns[-1:]) for m in _safe_finditer(pat, content)),
-        key=lambda m: m.start(),
-    )
+    try:
+        found = sorted(
+            (m for pat in (check.either_patterns or check.patterns[-1:]) for m in _safe_finditer(pat, content)),
+            key=lambda m: m.start(),
+        )
+    except PatternTimeoutError:
+        found = []
     one_per_line: dict[int, re.Match[str]] = {}
     for m in found:
         one_per_line.setdefault(_find_line_number(content, m), m)
@@ -159,9 +182,15 @@ def _every_match(
 def _build_sarif(
     rule_results: list[dict[str, Any]],
     rule_definitions: list[dict[str, Any]],
+    unfinished: list[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
-    """Build SARIF output dict matching downstream pipeline format."""
+    """Build SARIF output dict matching downstream pipeline format.
+
+    `unfinished` lists the `(check id, file uri)` pairs whose search ran out of time; they
+    ride under `notEvaluated`.
+    """
     return {
+        "notEvaluated": [{"checkId": cid, "uri": uri} for cid, uri in dict.fromkeys(unfinished or ())],
         "runs": [
             {
                 "tool": {"driver": {"rules": rule_definitions}},
@@ -169,13 +198,6 @@ def _build_sarif(
             }
         ],
     }
-
-
-def _should_exclude_file(file_path: Path, scan_root: Path, exclude_files: list[str] | None) -> bool:
-    """Check if file should be excluded based on file-path glob exclusion list."""
-    if not exclude_files:
-        return False
-    return matches_any_glob(file_path, exclude_files, scan_root)
 
 
 def _partition_checks(
@@ -276,12 +298,12 @@ def _emit_results(
 
 
 def _safe_finditer(pat: re.Pattern[str], content: str) -> list[re.Match[str]]:
-    """Run pat.finditer with the regex library's native timeout against catastrophic backtracking."""
+    """Run pat.finditer with the regex library's native timeout; raises `PatternTimeoutError` when it runs out."""
     try:
         return list(pat.finditer(content, timeout=_REGEX_TIMEOUT_S))
-    except TimeoutError:
+    except TimeoutError as exc:
         logger.warning("Regex finditer timed out after %.1fs: %s", _REGEX_TIMEOUT_S, pat.pattern[:80])
-        return []
+        raise PatternTimeoutError(pat.pattern[:80]) from exc
 
 
 def _retry_shadowed(
@@ -314,11 +336,20 @@ def _scan_combined(
     combined_patterns: list[CombinedPattern],
     results: list[dict[str, Any]],
     rule_defs: dict[str, dict[str, Any]],
+    unfinished: list[tuple[str, str]],
 ) -> None:
-    """Scan content using combined alternation patterns for batch matching."""
+    """Scan content using combined alternation patterns for batch matching.
+
+    A combined pattern that runs out of time leaves every check it carries unevaluated for this file.
+    """
     for combined in combined_patterns:
         matched_checks: set[str] = set()
-        for m in _safe_finditer(combined.regex, content):
+        try:
+            found = _safe_finditer(combined.regex, content)
+        except PatternTimeoutError:
+            unfinished.extend((c.id, file_uri) for c in combined.group_to_check.values())
+            continue
+        for m in found:
             group_name = m.lastgroup
             if group_name and group_name not in matched_checks:
                 check = combined.group_to_check[group_name]
@@ -360,8 +391,14 @@ def _scan_file(
     *,
     first_match_only: bool = False,
     combined_patterns: list[CombinedPattern] | None = None,
+    unfinished: list[tuple[str, str]] | None = None,
 ) -> None:
-    """Scan a single file against compiled checks, appending to results."""
+    """Scan a single file against compiled checks, appending to results.
+
+    A check whose search runs out of time yields no matches and is added to `unfinished`
+    as `(check id, file uri)`.
+    """
+    unfinished = [] if unfinished is None else unfinished
     try:
         if file_path.stat().st_size > _MAX_FILE_SIZE:
             logger.debug("Skipping oversized file: %s", file_path)
@@ -376,11 +413,15 @@ def _scan_file(
         file_uri = file_path.as_posix()
 
     if combined_patterns:
-        _scan_combined(content, file_uri, combined_patterns, results, rule_defs)
+        _scan_combined(content, file_uri, combined_patterns, results, rule_defs, unfinished)
 
     expanded = expand_imports_with_origins(content, file_path) if any(c.follow_imports for c in checks) else None
     for check in checks:
-        matches, text, imports = _check_hits(check, content, expanded, scan_root)
+        try:
+            matches, text, imports = _check_hits(check, content, expanded, scan_root)
+        except PatternTimeoutError:
+            unfinished.append((check.id, file_uri))
+            continue
         if matches:
             _emit_results(
                 check, matches[:1] if first_match_only else matches, file_uri, text, results, rule_defs, imports
@@ -392,22 +433,19 @@ def _scan_all_targets(
     scan_root: Path,
     universal: list[CompiledCheck],
     by_pattern: dict[str, list[CompiledCheck]],
-    exclude_dirs: frozenset[str],
-    exclude_files: list[str] | None = None,
 ) -> dict[str, Any]:
     """Scan all targets and return SARIF-shaped dict."""
     results: list[dict[str, Any]] = []
     rule_defs: dict[str, dict[str, Any]] = {}
+    unfinished: list[tuple[str, str]] = []
     for file_path in scan_targets:
-        if not file_path.is_file() or is_excluded(file_path, scan_root, exclude_dirs):
-            continue
-        if _should_exclude_file(file_path, scan_root, exclude_files):
+        if not file_path.is_file():
             continue
         individual = universal + _get_applicable_checks(file_path, scan_root, [], by_pattern)
         if not individual or not _is_text_file(file_path):
             continue
-        _scan_file(file_path, scan_root, individual, results, rule_defs)
-    return _build_sarif(results, list(rule_defs.values()))
+        _scan_file(file_path, scan_root, individual, results, rule_defs, unfinished=unfinished)
+    return _build_sarif(results, list(rule_defs.values()), unfinished)
 
 
 def _compile_ruleset(yml_paths: list[Path], body_only_paths: set[Path] | None) -> CompiledRuleSet:
@@ -426,8 +464,6 @@ def _scan_ruleset(
     target: Path,
     extra_targets: list[Path] | None = None,
     instruction_files: list[Path] | None = None,
-    exclude_dirs: frozenset[str] = frozenset(),
-    exclude_files: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run a compiled ruleset over the scan targets, returns SARIF-shaped dict."""
     if not ruleset.checks:
@@ -437,7 +473,7 @@ def _scan_ruleset(
         return {"runs": []}
     scan_root = target if target.is_dir() else target.parent
     universal, by_pattern = _partition_checks(ruleset.checks)
-    return _scan_all_targets(scan_targets, scan_root, universal, by_pattern, exclude_dirs, exclude_files)
+    return _scan_all_targets(scan_targets, scan_root, universal, by_pattern)
 
 
 def run_validation(
@@ -445,15 +481,11 @@ def run_validation(
     target: Path,
     extra_targets: list[Path] | None = None,
     instruction_files: list[Path] | None = None,
-    exclude_dirs: list[str] | None = None,
     body_only_paths: set[Path] | None = None,
-    exclude_files: list[str] | None = None,
 ) -> dict[str, Any]:
     """Execute regex validation with specified rule configs, returns SARIF-shaped dict."""
     ruleset = _compile_ruleset(yml_paths, body_only_paths)
-    return _scan_ruleset(
-        ruleset, target, extra_targets, instruction_files, frozenset(exclude_dirs or ()), exclude_files
-    )
+    return _scan_ruleset(ruleset, target, extra_targets, instruction_files)
 
 
 def _collect_sarif_matches(
@@ -487,19 +519,20 @@ def _collect_sarif_matches(
     return pairs, details
 
 
+def _collect_not_evaluated(sarif: dict[str, Any]) -> set[tuple[str, str]]:
+    """The `(check id, file)` pairs whose search ran out of time, from SARIF output."""
+    return {(e["checkId"], e["uri"]) for e in sarif.get("notEvaluated", ())}
+
+
 def _resolve_scanned_files(
     target: Path,
     instruction_files: list[Path] | None,
-    exclude_dirs: frozenset[str],
-    exclude_files: list[str] | None = None,
 ) -> list[str]:
     """Build list of relative file paths that were scanned."""
     scan_root = target if target.is_dir() else target.parent
     scanned: list[str] = []
     for fp in _resolve_scan_targets(target, instruction_files, None):
         if not fp.is_file():
-            continue
-        if is_excluded(fp, scan_root, exclude_dirs) or _should_exclude_file(fp, scan_root, exclude_files):
             continue
         try:
             scanned.append(fp.relative_to(scan_root).as_posix())
@@ -516,8 +549,12 @@ def _emit_expect_findings(
     scan_root: Path | None = None,
     fix_by_rule: dict[str, str] | None = None,
     skill_entries: set[Path] | None = None,
+    not_evaluated: set[tuple[str, str]] | None = None,
 ) -> list[LocalFinding]:
     """Convert expect/match results to LocalFinding list.
+
+    `not_evaluated` holds the `(check id, file)` pairs whose search ran out of time; such a
+    check says nothing about that file, whether it expects the pattern present or absent.
 
     A check with `entry_only` reports on a skill's entry file alone when `skill_entries` (the
     resolved entry files of the run) is given; without it the check applies to every file it names.
@@ -537,14 +574,18 @@ def _emit_expect_findings(
     """
     findings: list[LocalFinding] = []
     fix_by_rule = fix_by_rule or {}
+    unfinished = not_evaluated or set()
     for check in checks:
         check_id = check.id
-        parts = check_id.split(".")
-        rule_id = f"{parts[0]}:{parts[1]}:{parts[2]}" if len(parts) >= 3 else check_id
+        rule_id = rule_id_of(check_id)
         severity = check.severity
         msg = check.message
         fix_text = fix_by_rule.get(rule_id, "")
-        scanned = [f for f in scanned_files if _entry_ok(check, f, scan_root, skill_entries)]
+        applicable = [f for f in scanned_files if _entry_ok(check, f, scan_root, skill_entries)]
+        for f in applicable:
+            if (check_id, f) in unfinished and _applies_to(check, f, scan_root):
+                record_not_evaluated(rule_id, f)
+        scanned = [f for f in applicable if (check_id, f) not in unfinished]
         if check.every_match:
             # A match can sit in a file the scan did not list: the text an `@path` import splices in.
             imported = sorted(fp for cid, fp in matched_pairs if cid == check_id and fp not in scanned_files)
@@ -583,6 +624,13 @@ def _emit_expect_findings(
     return findings
 
 
+def _applies_to(check: CompiledCheck, rel_path: str, scan_root: Path | None) -> bool:
+    """Whether `check` considers `rel_path`: the file passes its path filter and is not below its `min_lines`."""
+    return _file_matches_path_filter(rel_path, check.path_includes) and not _file_below_min_lines(
+        rel_path, check.min_lines, scan_root
+    )
+
+
 def _entry_ok(check: CompiledCheck, rel_path: str, scan_root: Path | None, entries: set[Path] | None) -> bool:
     """Whether `check` applies to `rel_path`: an `entry_only` check skips a file that is no skill's entry file."""
     if not check.entry_only or entries is None:
@@ -609,10 +657,8 @@ def run_checks(
     yml_paths: list[Path],
     target: Path,
     instruction_files: list[Path] | None = None,
-    exclude_dirs: frozenset[str] = frozenset(),
     min_lines_overrides: dict[str, int] | None = None,
     fix_by_rule: dict[str, str] | None = None,
-    exclude_files: list[str] | None = None,
     skill_entries: set[Path] | None = None,
 ) -> list[LocalFinding]:
     """Execute regex validation and return LocalFinding list.
@@ -632,11 +678,9 @@ def run_checks(
     """
     ruleset = _compile_ruleset(yml_paths, None)
     checks = _apply_min_lines_overrides(ruleset.checks, min_lines_overrides) if min_lines_overrides else ruleset.checks
-    sarif = _scan_ruleset(
-        ruleset, target, instruction_files=instruction_files, exclude_dirs=exclude_dirs, exclude_files=exclude_files
-    )
+    sarif = _scan_ruleset(ruleset, target, instruction_files=instruction_files)
     matched_pairs, match_details = _collect_sarif_matches(sarif)
-    scanned_files = _resolve_scanned_files(target, instruction_files, exclude_dirs, exclude_files)
+    scanned_files = _resolve_scanned_files(target, instruction_files)
     return _emit_expect_findings(
         checks,
         matched_pairs,
@@ -645,6 +689,7 @@ def run_checks(
         scan_root=target if target.is_dir() else target.parent,
         fix_by_rule=fix_by_rule,
         skill_entries=skill_entries,
+        not_evaluated=_collect_not_evaluated(sarif),
     )
 
 
@@ -656,8 +701,7 @@ def _apply_min_lines_overrides(checks: list[CompiledCheck], overrides: dict[str,
     """
     out: list[CompiledCheck] = []
     for check in checks:
-        parts = check.id.split(".")
-        rule_id = f"{parts[0]}:{parts[1]}:{parts[2]}" if len(parts) >= 3 else ""
+        rule_id = rule_id_of(check.id)
         out.append(replace(check, min_lines=int(overrides[rule_id])) if rule_id in overrides else check)
     return out
 

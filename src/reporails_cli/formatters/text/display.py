@@ -36,11 +36,13 @@ from reporails_cli.formatters.text.file_groups import (
     build_hints_by_file,
     build_regime_by_file,
 )
+from reporails_cli.formatters.text.not_evaluated import print_not_evaluated
 from reporails_cli.formatters.text.scorecard import (
     ScopeInfo,
     print_scorecard,
 )
 from reporails_cli.formatters.text.triage_view import print_file_card
+from reporails_cli.formatters.text.verdict import render_excluded_line
 from reporails_cli.formatters.triage import split_conventions
 
 console = Console()
@@ -312,13 +314,13 @@ def _print_header(tier: str) -> None:
     console.print(f"\n[bold]Reporails[/bold] \u2014 Diagnostics{tier_badge}\n")
 
 
-def _print_notices(notices: Any) -> None:
+def _print_notices(notices: Any, ascii_mode: bool) -> None:
     """Print the notices under the header, then a blank line; nothing when there are none."""
     if not notices:
         return
     from reporails_cli.formatters.text.notices import print_notices
 
-    print_notices(console, notices)
+    print_notices(console, notices, ascii_mode=ascii_mode)
     console.print()
 
 
@@ -355,15 +357,18 @@ def print_text_result(
     scope.type_str = file_type_summary(all_files, skill_of) if all_files else "0 files"
 
     _print_header(tier)
-    _print_notices(result.notices)
+    _print_notices(result.notices, ascii_mode)
     if not result.findings:
         console.print(f"  {'ok' if ascii_mode else chr(0x2713)}  No findings.")
+        render_excluded_line(result, scored=has_quality)
+        print_not_evaluated(console, result.not_evaluated)
         _render_funnel_cta(funnel_error)
         return
 
     _render_findings_and_scorecard(
         result, ruleset_map, ascii_mode, verbose, scope, tier, elapsed_ms, root, file_type_by_path or {}, skill_of
     )
+    print_not_evaluated(console, result.not_evaluated)
     _render_funnel_cta(funnel_error)
 
 
@@ -466,7 +471,7 @@ def _render_funnel_cta(funnel_error: object) -> None:
     bug_label = _short_url_label(bug_url)
     console.print()
     console.print("  [yellow]⚠[/yellow]  Server diagnostics unavailable.")
-    console.print(f"  {cta}")
+    console.print("  " + cta.replace("\n", "\n  "))
     if funnel_error.error not in KNOWN_ERRORS:
         link = f"[link={bug_url}][bold]{bug_label}[/bold][/link]"
         console.print(f"  [dim]Did you see an error? Let us know: {link}[/dim]")
@@ -505,6 +510,7 @@ def filter_result_to_paths(result: Any, paths: set[Path], project_root: Path) ->
     # repetition and overlap counts match its narrowed pair list at every tier.
     coords = tuple(c for c in result.cross_file_coordinates if _in_scope(c.file_1) or _in_scope(c.file_2))
     per_file = tuple(fa for fa in result.per_file_analysis if _in_scope(fa.file))
+    unfinished = tuple(pair for pair in result.not_evaluated if _in_scope(pair[1]))
     sev = Counter(f.severity for f in findings)
     stats = CombinedStats(
         total_findings=len(findings),
@@ -526,6 +532,7 @@ def filter_result_to_paths(result: Any, paths: set[Path], project_root: Path) ->
         stats=stats,
         per_file_analysis=per_file,
         quality=quality,
+        not_evaluated=unfinished,
     )
 
 

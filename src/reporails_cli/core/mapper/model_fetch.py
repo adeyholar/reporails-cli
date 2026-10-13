@@ -33,6 +33,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from reporails_cli.core.platform.config.bootstrap import env_flag
+
 if TYPE_CHECKING:
     import httpx
 
@@ -151,9 +153,7 @@ def cache_models_dir(version: str = MODEL_VERSION) -> Path:
     return get_global_cache_dir() / "models" / version
 
 
-def offline_requested() -> bool:
-    """Whether ``AILS_MODEL_OFFLINE`` asks to never download the model set."""
-    return os.environ.get(_ENV_OFFLINE, "").strip().lower() not in ("", "0", "false", "no")
+offline_requested = functools.partial(env_flag, _ENV_OFFLINE)  # AILS_MODEL_OFFLINE: never download
 
 
 # One fetch at a time: concurrent first uses in one process (e.g. MCP worker threads) wait

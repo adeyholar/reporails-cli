@@ -14,7 +14,7 @@ import sys
 import time
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import typer
 
@@ -24,6 +24,7 @@ from reporails_cli.core.discovery.agent_discovery import (
     root_markers,
     user_level_agent_dir,
 )
+from reporails_cli.core.discovery.exclusions import RunExclusions
 from reporails_cli.core.discovery.walk import safe_resolve
 from reporails_cli.formatters.text.display import print_text_result
 from reporails_cli.interfaces.cli.helpers import console
@@ -36,14 +37,14 @@ def _resolve_capability_paths_one(
     capability_name: str,
     effective_agent: str,
     project_root: Path,
-    exclude_dirs: list[str] | tuple[str, ...] | None = None,
+    exclusions: Any = None,
 ) -> tuple[set[Path], list[Any]]:
     """Resolve one (capability, name) spec to its file set + unresolved-skill list; a spec that
     names no file prints why and exits 2."""
     from reporails_cli.core.classify.capability_paths import TargetError, resolve_capability_spec
 
     try:
-        return resolve_capability_spec(capability, capability_name, effective_agent, project_root, exclude_dirs)
+        return resolve_capability_spec(capability, capability_name, effective_agent, project_root, exclusions)
     except TargetError as err:
         if err.reason == "undeclared":
             console.print(
@@ -67,18 +68,26 @@ def _resolve_capability_paths(
     specs: list[tuple[str, str]],
     effective_agent: str,
     project_root: Path,
-    exclude_dirs: list[str] | tuple[str, ...] | None = None,
+    exclusions: Any = None,
 ) -> tuple[set[Path], list[Any]]:
     """Union of every (capability, name) spec resolved against the agent's vocabulary."""
     paths: set[Path] = set()
     unresolved: list[Any] = []
     for capability, capability_name in specs:
         one_paths, one_unresolved = _resolve_capability_paths_one(
-            capability, capability_name, effective_agent, project_root, exclude_dirs
+            capability, capability_name, effective_agent, project_root, exclusions
         )
         paths |= one_paths
         unresolved.extend(one_unresolved)
     return paths, unresolved
+
+
+def _named_paths(state: Any, capability_paths: frozenset[Path]) -> frozenset[Path]:
+    """The files the run names: capability paths, path targets that are files, and the single file."""
+    single = state.targets.single_file
+    return frozenset(
+        capability_paths | {t for t in state.targets.path_targets if t.is_file()} | ({single} if single else set())
+    )
 
 
 def _resolved_within_target(f: Path, target: Path) -> bool:
@@ -433,11 +442,18 @@ def _emit_stage_timing(stage_timer: Any, output_format: str) -> None:
         console.print(f"  [dim]{line}[/dim]")
 
 
+class HealScope(NamedTuple):
+    """The files a heal pass may touch, the agent they are checked under, and what the run left out."""
+
+    instruction_files: list[Path]
+    effective_agent: str
+    exclusions: RunExclusions | None = None
+
+
 def _run_heal_pass(
     target: Path,
-    instruction_files: list[Path],
+    scope: HealScope,
     ruleset_map: Any,
-    effective_agent: str,
     dry_run: bool,
     output_format: str,
     notices: Any = (),
@@ -454,6 +470,7 @@ def _run_heal_pass(
         _output_heal_results,
     )
 
+    instruction_files, effective_agent, exclusions = scope
     show = sys.stdout.isatty() and output_format != "json"
     heal_start = time.perf_counter()
     # A line the author annotated with an `ails-disable-line` directive is reviewed —
@@ -463,7 +480,9 @@ def _run_heal_pass(
     # The mechanical pass writes only within the scoped `instruction_files` set — it
     # cannot rewrite a mapped file outside scope. Section suggestions never write.
     keyed = _apply_keyed_fixes(ruleset_map, target, workflow, dry_run, show, console, instruction_files, suppressed)
-    suggested = _collect_section_suggestions(target, instruction_files, ruleset_map, effective_agent, show, console)
+    suggested = _collect_section_suggestions(
+        target, instruction_files, ruleset_map, effective_agent, show, console, exclusions
+    )
     heal_ms = round((time.perf_counter() - heal_start) * 1000, 1)
     _output_heal_results(keyed.fixes, suggested, dry_run, heal_ms, output_format, console, notices, keyed)
 

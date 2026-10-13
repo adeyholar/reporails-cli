@@ -32,7 +32,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 from reporails_cli.core.platform.adapters.registry import infer_agent_from_rule_id, load_rules  # noqa: E402
 from reporails_cli.formatters import text as text_formatter  # noqa: E402
-from reporails_cli.interfaces.cli.check_flow import CheckInputs, CheckState, run_check_flow  # noqa: E402
+from reporails_cli.interfaces.cli.check_flow import CheckInputs, CheckRender, CheckState, run_check_flow  # noqa: E402
 from reporails_cli.interfaces.cli.check_orchestration import _validate_output_format  # noqa: E402
 from reporails_cli.interfaces.cli.check_support import (  # noqa: E402
     _arm_check_timeout,
@@ -80,6 +80,11 @@ def check(
         "--fix",
         help="Apply auto-fixes after validation. Needs an account — run `ails login` first.",
     ),
+    no_promo: bool = typer.Option(
+        False,
+        "--no-promo",
+        help="Hide announcements from reporails; messages about your account still show. Same as AILS_NO_PROMO=1.",
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="With --heal: preview fixes without writing."),
     cwd: bool = typer.Option(False, "--cwd", help="With --heal: opt into rewriting the whole project."),
 ) -> None:
@@ -103,7 +108,8 @@ def check(
             dry_run=dry_run,
             cwd=cwd,
             project_root=Path.cwd().resolve(),
-        )
+        ),
+        render=CheckRender(no_promo=no_promo),
     )
     run_check_flow(state)
 

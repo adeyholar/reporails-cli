@@ -7,14 +7,30 @@ in `rule_tools.py`.
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
+from reporails_cli.core.discovery.exclusions import RunExclusions
 from reporails_cli.core.discovery.walk import safe_resolve
+from reporails_cli.core.lint.regex.not_evaluated import not_evaluated_scope
+from reporails_cli.core.platform.adapters.notices_seen import visible_notices
 from reporails_cli.core.platform.config.bootstrap import is_initialized
 from reporails_cli.formatters import mcp as mcp_formatter
 from reporails_cli.formatters.host_hooks import host_hooks_field
 
 logger = logging.getLogger(__name__)
+
+# The `(folders, file globs)` a run left out because the user set them.
+Excluded = tuple[tuple[str, ...], tuple[str, ...]]
+
+
+class LeftOut(NamedTuple):
+    """What a run left out: the `(folders, file globs)` to report and the exclusion set behind them."""
+
+    record: Excluded = ((), ())
+    exclusions: RunExclusions | None = None
+
+
+NOTHING_LEFT_OUT = LeftOut()
 
 
 def _unknown_agent_error(agent: str) -> dict[str, Any]:
@@ -31,12 +47,13 @@ def _unknown_agent_error(agent: str) -> dict[str, Any]:
 
 
 def _discover_files(
-    target: Path, single_file: Path | None = None
-) -> tuple[list[Any], str, list[Any], dict[str, str]] | dict[str, Any]:
+    target: Path, single_file: Path | None = None, named: frozenset[Path] = frozenset()
+) -> tuple[list[Any], str, list[Any], dict[str, str], Excluded, Any] | dict[str, Any]:
     """Detect agents and discover instruction files.
 
-    Returns `(filter_agents, agent, files, file_type_by_path)` on success, or a terminal
-    payload dict when there is nothing to lint: a structured "Unknown agent" error
+    Returns `(filter_agents, agent, files, file_type_by_path, excluded, exclusions)` on success, `excluded` being the
+    `(folders, file globs)` the pass left out (empty for a single file) and `exclusions` the run's exclusion set, or a
+    terminal payload dict when there is nothing to lint: a structured "Unknown agent" error
     (mirroring the CLI's `_validate_agent`) for a misconfigured `default_agent`, or the
     CLI's own benign empty-project envelope (`formatters/json.py::empty_result_payload` —
     the SAME top-level shape a normal run emits, with `files: {}` and zeroed `stats`)
@@ -45,14 +62,12 @@ def _discover_files(
     rules-only tree with no distinctive main file, reports "nothing to find" exactly as
     the CLI does.
 
-    `target` is the discovery root (a directory). Discovery narrows against the
-    `resolve_agent_filters` `filtered` list — the resolved, exclude-filtered agent set
-    the CLI check flow discovers against — not the raw detected list, so a multi-agent
-    project resolves identically on both surfaces. When `generic_scanning` is on, the
-    `@`-import-reached file fold (`core/pipeline/mapping.py::apply_generic_scan`) runs on
-    the discovered set too, matching the CLI's `_apply_generic_scan`. When `single_file` is
-    given the validated set is narrowed to that one file while agents resolve against
-    `target`.
+    `target` is the discovery root (a directory). Discovery narrows against the resolved agent
+    set after the exclusions, not the raw detected list. When `generic_scanning` is on, the
+    `@`-import-reached files join the discovered set. When `single_file` is given the validated
+    set is that one file, kept whatever is excluded, while agents resolve against `target`, and
+    `named` is ignored. Otherwise `named` holds files the caller named, which stay in the set
+    whatever is excluded.
     """
     from reporails_cli.core.discovery.agents import get_known_agents
     from reporails_cli.core.pipeline.mapping import apply_generic_scan, discover_scope
@@ -68,21 +83,25 @@ def _discover_files(
     # scan includes each agent's config surfaces (hooks, permissions, MCP declarations, plugin
     # manifests) alongside its instruction and rule files, matching `ails check`'s own scope.
     found = discover_scope(
-        target, config.default_agent, config.exclude_dirs, config.exclude_files, scan_files=single_file is None
+        target,
+        config.default_agent,
+        None,
+        None,
+        scan_files=single_file is None,
+        named=frozenset({single_file}) if single_file is not None else named,
     )
-    effective_agent, filter_agents = found.effective_agent, found.filtered
     instruction_files = [safe_resolve(single_file)] if single_file is not None else found.files
     if not instruction_files:
         from reporails_cli.formatters.json import empty_result_payload
 
-        return empty_result_payload(target)
+        return empty_result_payload(target, found.excluded)
 
     import_extra, file_type_by_path = apply_generic_scan(
-        target, instruction_files, effective_agent, config.generic_scanning, config.exclude_files
+        target, instruction_files, found.effective_agent, config.generic_scanning, found.exclusions
     )
     if import_extra:
         instruction_files = list(instruction_files) + import_extra
-    return filter_agents, effective_agent, instruction_files, file_type_by_path
+    return found.filtered, found.effective_agent, instruction_files, file_type_by_path, found.excluded, found.exclusions
 
 
 def _build_map(
@@ -185,7 +204,9 @@ def _display_score(result: Any, target: Path | None = None, scan_root: Path | No
     return None
 
 
-def _run_pipeline(target: Path, full: bool = False) -> tuple[dict[str, Any], Any, float | None]:
+def _run_pipeline(
+    target: Path, full: bool = False, named: frozenset[Path] = frozenset()
+) -> tuple[dict[str, Any], Any, float | None]:
     """Run the full check pipeline; returns `(payload, ruleset_map, file_score)`.
 
     A file `target` narrows discovery to its project root and the validated set
@@ -197,13 +218,13 @@ def _run_pipeline(target: Path, full: bool = False) -> tuple[dict[str, Any], Any
     file) — the same value `remedy_brief` reports for that file.
     """
     scan_root, single_file = _resolve_scan_target(target)
-    discovery = _discover_files(scan_root, single_file=single_file)
+    discovery = _discover_files(scan_root, single_file=single_file, named=named)
     if isinstance(discovery, dict):
         return discovery, None, None
     model_error = model_not_ready_error()
     if model_error is not None:
         return model_error, None, None
-    filter_agents, effective_agent, instruction_files, file_type_by_path = discovery
+    filter_agents, effective_agent, instruction_files, file_type_by_path, excluded, exclusions = discovery
     return _lint_discovered(
         scan_root,
         effective_agent,
@@ -212,6 +233,7 @@ def _run_pipeline(target: Path, full: bool = False) -> tuple[dict[str, Any], Any
         file_type_by_path,
         full=full,
         single_file=single_file,
+        left_out=LeftOut(excluded, exclusions),
     )
 
 
@@ -223,6 +245,7 @@ def _lint_discovered(
     file_type_by_path: dict[str, str] | None = None,
     full: bool = False,
     single_file: Path | None = None,
+    left_out: LeftOut = NOTHING_LEFT_OUT,
 ) -> tuple[dict[str, Any], Any, float | None]:
     """Run M-probes + content/client checks over discovered files; returns `(payload,
     ruleset_map, file_score)`.
@@ -246,7 +269,13 @@ def _lint_discovered(
 
     ruleset_map, mapper_error = _build_map(scan_root, instruction_files, filter_agents)
     result, funnel_error = _check_and_assemble(
-        scan_root, instruction_files, effective_agent, filter_agents, ruleset_map, scoped=single_file is not None
+        scan_root,
+        instruction_files,
+        effective_agent,
+        filter_agents,
+        ruleset_map,
+        left_out,
+        scoped=single_file is not None,
     )
     payload = json_formatter.format_combined_result(
         result, ruleset_map=ruleset_map, project_root=scan_root, file_type_by_path=file_type_by_path
@@ -254,9 +283,8 @@ def _lint_discovered(
     payload = with_host_hooks(_attach_funnel(payload, funnel_error), result)
     if mapper_error is not None:
         payload["mapper_error"] = mapper_error
-    score = _display_score(result, single_file, scan_root) if single_file is not None else None
     payload = payload if full else mcp_formatter.bound_validate_payload(payload)
-    return payload, ruleset_map, score
+    return payload, ruleset_map, _display_score(result, single_file, scan_root) if single_file is not None else None
 
 
 def with_host_hooks(payload: dict[str, Any], result: Any) -> dict[str, Any]:
@@ -286,23 +314,35 @@ def _check_and_assemble(
     effective_agent: str,
     filter_agents: list[Any],
     ruleset_map: Any,
+    left_out: LeftOut = NOTHING_LEFT_OUT,
     *,
     scoped: bool = False,
 ) -> tuple[Any, Any]:
     """Run the local checks, then `_assemble_mcp_result`; the request is resolved under the agents whose rules ran."""
     pairs = _mcp_agent_file_pairs(scan_root, instruction_files, filter_agents, effective_agent)
-    return _assemble_mcp_result(
+    with not_evaluated_scope() as unfinished:
+        local = _checks_over_pairs(scan_root, pairs, ruleset_map, scoped, left_out.exclusions)
+    from reporails_cli.core.pipeline.assemble import with_exclusions
+
+    result, funnel_error = _assemble_mcp_result(
         scan_root,
         effective_agent,
         filter_agents,
         ruleset_map,
-        _checks_over_pairs(scan_root, pairs, ruleset_map, scoped),
+        local,
         rule_agents=tuple(dict.fromkeys(agent_id for agent_id, _ in pairs)),
+        not_evaluated=tuple(unfinished),
+        exclusions=left_out.exclusions,
     )
+    return with_exclusions(result, left_out.record), funnel_error
 
 
 def _checks_over_pairs(
-    scan_root: Path, pairs: list[tuple[str, list[Any]]], ruleset_map: Any, scoped: bool
+    scan_root: Path,
+    pairs: list[tuple[str, list[Any]]],
+    ruleset_map: Any,
+    scoped: bool,
+    exclusions: RunExclusions | None = None,
 ) -> tuple[list[Any], list[Any], list[Any]]:
     """Run M-probes + content/client checks over the `(agent, its files)` pairs, returning
     `(m_findings, content_findings, client_findings)`.
@@ -321,11 +361,13 @@ def _checks_over_pairs(
     from reporails_cli.core.mapper.skills import skill_membership
 
     skills = skill_membership(ruleset_map)
-    m_findings = run_m_probes_over_pairs(scan_root, pairs, scoped=scoped, skills=skills)
+    m_findings = run_m_probes_over_pairs(scan_root, pairs, scoped=scoped, skills=skills, exclusions=exclusions)
     content_findings: list[Any] = []
     for agent_id, agent_files in pairs:
         if ruleset_map:
-            content_findings.extend(run_content_quality_checks(ruleset_map, scan_root, agent_files, agent=agent_id))
+            content_findings.extend(
+                run_content_quality_checks(ruleset_map, scan_root, agent_files, agent=agent_id, exclusions=exclusions)
+            )
     client_findings = run_client_checks(ruleset_map) if ruleset_map else []
     return m_findings, content_findings, client_findings
 
@@ -337,6 +379,7 @@ def _build_assemble_inputs(
     ruleset_map: Any,
     local: tuple[list[Any], list[Any], list[Any]],
     rule_agents: tuple[str, ...] = (),
+    not_evaluated: tuple[tuple[str, str], ...] = (),
 ) -> Any:
     """The shared `AssembleInputs` for `_assemble_mcp_result`, built from the local M-probe /
     content / client finding lists."""
@@ -355,6 +398,7 @@ def _build_assemble_inputs(
         lint_result=None,
         alias_fn=rule_aliases,
         rule_agents=rule_agents,
+        not_evaluated=not_evaluated,
     )
 
 
@@ -364,7 +408,7 @@ def _server_lint_result(inputs: Any) -> tuple[Any, Any, tuple[Any, ...]]:
     response = _server_lint(inputs)
     if response is None:
         return None, None, ()
-    return response.result, response.funnel_error, response.notices
+    return response.result, response.funnel_error, visible_notices(response.notices)
 
 
 def _assemble_mcp_result(
@@ -374,16 +418,19 @@ def _assemble_mcp_result(
     ruleset_map: Any,
     local: tuple[list[Any], list[Any], list[Any]],
     rule_agents: tuple[str, ...] = (),
+    not_evaluated: tuple[tuple[str, str], ...] = (),
+    exclusions: RunExclusions | None = None,
 ) -> tuple[Any, Any]:
     """Server-lint the local findings, then run the shared assemble spine. Returns `(result, funnel_error)`."""
     from dataclasses import replace
 
     from reporails_cli.core.pipeline.assemble import assemble_result
 
-    inputs = _build_assemble_inputs(scan_root, effective_agent, filter_agents, ruleset_map, local, rule_agents)
+    inputs = _build_assemble_inputs(
+        scan_root, effective_agent, filter_agents, ruleset_map, local, rule_agents, not_evaluated
+    )
     lint_result, funnel_error, notices = _server_lint_result(inputs)
-    result = assemble_result(replace(inputs, lint_result=lint_result, notices=notices))
-    return result, funnel_error
+    return assemble_result(replace(inputs, lint_result=lint_result, notices=notices), exclusions), funnel_error
 
 
 def _server_lint(inputs: Any) -> Any:
@@ -475,12 +522,15 @@ def _rules_missing_payload() -> dict[str, Any]:
     }
 
 
-def run_pipeline_for_path(path: str, full: bool = False) -> tuple[dict[str, Any], Any, float | None]:
+def run_pipeline_for_path(
+    path: str, full: bool = False, named: frozenset[Path] = frozenset()
+) -> tuple[dict[str, Any], Any, float | None]:
     """Run the pipeline for `path` (directory or file); returns `(payload, ruleset_map,
     file_score)`. `ruleset_map` and `file_score` are `None` on a structured error/needs-install
     payload — the caller checks `"error"` / `"needs_install"` in the payload, as `validate_tool`
-    does. This is the one pipeline entry point: `validate_tool`, `validate`'s preservation check,
-    and `remedy_brief`'s per-file runs all call it, never a second code path.
+    does. For a directory `path`, `named` holds files the caller named, which are checked whatever is
+    excluded; the Excluded record still lists every pattern the user set. For a file `path` only that
+    file is named and `named` is ignored.
     """
     if not is_initialized():
         return _rules_missing_payload(), None, None
@@ -490,7 +540,7 @@ def run_pipeline_for_path(path: str, full: bool = False) -> tuple[dict[str, Any]
     # When `path` is an existing file, the pipeline narrows discovery to the
     # file's project root and the validated set to that single file.
     try:
-        return _run_pipeline(target, full=full)
+        return _run_pipeline(target, full=full, named=named)
     except (FileNotFoundError, ValueError, RuntimeError) as e:
         return {"error": str(e)}, None, None
 

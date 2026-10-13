@@ -23,7 +23,10 @@ MAX_NOTICES = 10
 
 
 def _notice(entry: Any) -> Notice | None:
-    """One entry as a `Notice`; `None` when it is not a dict with a usable id, level, text and url."""
+    """One entry as a `Notice`; `None` when it is not a dict with a usable id, level, text and url.
+
+    A `kind` other than exactly `"promo"` reads as a plain notice.
+    """
     if not isinstance(entry, dict):
         return None
     ident, level, text = entry.get("id"), entry.get("level"), entry.get("text")
@@ -32,7 +35,8 @@ def _notice(entry: Any) -> Notice | None:
         return None
     if not (isinstance(level, str) and isinstance(url, str)) or level not in NOTICE_LEVELS:
         return None
-    return Notice(id=ident, level=level, text=text, url=url)
+    kind = "promo" if entry.get("kind") == "promo" else "notice"
+    return Notice(id=ident, level=level, text=text, url=url, kind=kind)
 
 
 def notices_from_list(raw: object) -> tuple[Notice, ...]:

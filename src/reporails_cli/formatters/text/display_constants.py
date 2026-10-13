@@ -506,3 +506,18 @@ def more_pairs_line(hidden: int) -> str:
 def conventions_phrase(n: int) -> str:
     """The counted line for the findings that only ask a file to document something."""
     return f"{counted(n, 'documentation convention')} not present"
+
+
+def excluded_phrase(
+    dirs: Iterable[str], files: Iterable[str], *, scored: bool = True, imported_counted: bool = False
+) -> str:
+    """`agents/, docs/, *.generated.md — not checked; the score covers the rest`; empty when nothing was left out.
+
+    Without a score the closing clause is dropped: `agents/, docs/ — not checked`. When a checked file imports
+    text from a left-out file, `; imported text in checked files still counts` closes the line.
+    """
+    names = [f"{d.rstrip('/')}/" for d in dirs] + list(files)
+    if not names:
+        return ""
+    phrase = f"{', '.join(names)} — not checked" + ("; the score covers the rest" if scored else "")
+    return phrase + ("; imported text in checked files still counts" if imported_counted else "")

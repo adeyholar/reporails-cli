@@ -15,6 +15,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from reporails_cli.formatters.text.display_constants import excluded_phrase
+from reporails_cli.formatters.text.not_evaluated import group_not_evaluated, not_evaluated_sentence
+
 # The `workflow.locations` block (header plus rows) stays under this many characters.
 LOCATIONS_BUDGET = 4000
 # A location row names at most this many files, then `+N more`.
@@ -57,6 +60,7 @@ def render_text_view(payload: dict[str, Any]) -> str:
     rules = _as_dict(payload.get("rules"))
     sections = (
         _status_lines(payload),
+        _excluded_lines(payload),
         _compression_lines(payload),
         _offline_lines(payload),
         _notice_lines(payload),
@@ -66,6 +70,7 @@ def render_text_view(payload: dict[str, Any]) -> str:
         _preservation_lines(payload),
         _conformance_lines(payload),
         _feedback_lines(payload, rules),
+        _not_evaluated_lines(payload),
         _truncated_lines(payload),
     )
     return "\n".join(line for section in sections for line in section)
@@ -106,6 +111,17 @@ def _status_lines(payload: dict[str, Any]) -> list[str]:
     )
     line = _dot(*parts)
     return [f"validate: {line}"] if line else []
+
+
+def _excluded_lines(payload: dict[str, Any]) -> list[str]:
+    excluded = _as_dict(payload.get("excluded"))
+    phrase = excluded_phrase(
+        excluded.get("dirs") or (),
+        excluded.get("files") or (),
+        scored=payload.get("quality") is not None,
+        imported_counted=bool(excluded.get("imported_text_counted")),
+    )
+    return [f"excluded: {phrase}"] if phrase else []
 
 
 def _compression_lines(payload: dict[str, Any]) -> list[str]:
@@ -153,7 +169,8 @@ def _notice_lines(payload: dict[str, Any]) -> list[str]:
     lines = ["notices:"]
     for n in notices:
         url = f" ({n['url']})" if n.get("url") else ""
-        lines.append(f"  - {n.get('level', 'info')}: {n.get('text', '')}{url}")
+        label = "promo" if n.get("kind") == "promo" else n.get("level", "info")
+        lines.append(f"  - {label}: {n.get('text', '')}{url}")
     return lines
 
 
@@ -384,6 +401,15 @@ def _feedback_lines(payload: dict[str, Any], rules: dict[str, Any]) -> list[str]
         how = f"op: {f['op']}" if f.get("op") else (f"fix: {f['fix']}" if f.get("fix") else "")
         lines.append("  - " + " — ".join(p for p in (f"{head} {where}".strip(), f.get("message"), how) if p))
     return lines
+
+
+def _not_evaluated_lines(payload: dict[str, Any]) -> list[str]:
+    pairs = [
+        (str(e.get("rule", "")), str(e.get("file", "")))
+        for e in payload.get("not_evaluated") or ()
+        if isinstance(e, dict)
+    ]
+    return [not_evaluated_sentence(file, rules) for file, rules in group_not_evaluated(pairs)]
 
 
 def _truncated_lines(payload: dict[str, Any]) -> list[str]:

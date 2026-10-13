@@ -5,10 +5,10 @@ Provides Unicode and ASCII character sets for box drawing and icons.
 
 from __future__ import annotations
 
-import os
+from reporails_cli.core.platform.config.bootstrap import env_flag
 
 # ASCII mode: set AILS_ASCII=1 or pass ascii=True to format functions
-ASCII_MODE = os.environ.get("AILS_ASCII", "").lower() in ("1", "true", "yes")
+ASCII_MODE = env_flag("AILS_ASCII")
 
 # Character sets for box drawing
 UNICODE_CHARS = {
@@ -29,6 +29,7 @@ UNICODE_CHARS = {
     "up": "↑",
     "down": "↓",
     "sep": "─",
+    "arrow": "→",
 }
 
 ASCII_CHARS = {
@@ -49,6 +50,7 @@ ASCII_CHARS = {
     "up": "^",
     "down": "v",
     "sep": "-",
+    "arrow": "->",
 }
 
 

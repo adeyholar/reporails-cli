@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from reporails_cli.core.platform.runtime.merger import CombinedResult
 from reporails_cli.interfaces.mcp import tools, validate_targets
 
 pytestmark = [pytest.mark.unit, pytest.mark.subsys_server]
@@ -50,7 +51,7 @@ def test_run_pipeline_scopes_a_single_file_target(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "reporails_cli.interfaces.mcp.tools._discover_files",
-        lambda _target, single_file=None: ([], "claude", [single_file], {}),
+        lambda _target, single_file=None, named=frozenset(): ([], "claude", [single_file], {}, ((), ()), None),
     )
     monkeypatch.setattr("reporails_cli.interfaces.mcp.tools._build_map", lambda *_a, **_k: (None, None))
     monkeypatch.setattr(
@@ -59,7 +60,7 @@ def test_run_pipeline_scopes_a_single_file_target(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "reporails_cli.interfaces.mcp.tools._assemble_mcp_result",
-        lambda *_a, **_k: (SimpleNamespace(hooks=()), None),
+        lambda *_a, **_k: (CombinedResult(), None),
     )
     monkeypatch.setattr("reporails_cli.formatters.json.format_combined_result", lambda *_a, **_k: {"files": {}})
 
@@ -77,7 +78,7 @@ def test_run_pipeline_does_not_scope_a_directory_target(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "reporails_cli.interfaces.mcp.tools._discover_files",
-        lambda _target, single_file=None: ([], "claude", [claude_md], {}),
+        lambda _target, single_file=None, named=frozenset(): ([], "claude", [claude_md], {}, ((), ()), None),
     )
     monkeypatch.setattr("reporails_cli.interfaces.mcp.tools._build_map", lambda *_a, **_k: (None, None))
     monkeypatch.setattr(
@@ -86,7 +87,7 @@ def test_run_pipeline_does_not_scope_a_directory_target(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "reporails_cli.interfaces.mcp.tools._assemble_mcp_result",
-        lambda *_a, **_k: (SimpleNamespace(hooks=()), None),
+        lambda *_a, **_k: (CombinedResult(), None),
     )
     monkeypatch.setattr("reporails_cli.formatters.json.format_combined_result", lambda *_a, **_k: {"files": {}})
 
@@ -280,7 +281,7 @@ def test_discover_files_folds_generic_scanned_imports(monkeypatch, tmp_path):
     result = tools._discover_files(tmp_path)
 
     assert not isinstance(result, dict), result
-    _filter_agents, _agent, files, file_type_by_path = result
+    _filter_agents, _agent, files, file_type_by_path, _excluded, _exclusions = result
     assert claude_md in files
     assert arch in files
     assert file_type_by_path == {"docs/arch.md": "generic"}
@@ -309,7 +310,7 @@ def test_discover_files_skips_generic_scan_fold_when_disabled(monkeypatch, tmp_p
     result = tools._discover_files(tmp_path)
 
     assert not isinstance(result, dict), result
-    _filter_agents, _agent, files, file_type_by_path = result
+    _filter_agents, _agent, files, file_type_by_path, _excluded, _exclusions = result
     assert files == [claude_md]
     assert file_type_by_path == {}
 

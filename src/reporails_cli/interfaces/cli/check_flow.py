@@ -25,8 +25,9 @@ from typing import Any
 import typer
 
 from reporails_cli.core.discovery.walk import safe_resolve
+from reporails_cli.core.lint.regex.not_evaluated import not_evaluated_scope
 from reporails_cli.core.mapper.skills import skill_membership
-from reporails_cli.core.pipeline.mapping import discover_scope
+from reporails_cli.core.pipeline.mapping import apply_generic_scan, discover_scope
 from reporails_cli.interfaces.cli.check_notices import (
     _agent_is_pinned,
     _emit_empty_run,
@@ -35,9 +36,11 @@ from reporails_cli.interfaces.cli.check_notices import (
     _notify_heal_scope_skips,
 )
 from reporails_cli.interfaces.cli.check_orchestration import (
+    HealScope,
     _dispatch_output,
     _emit_stage_timing,
     _file_under_target,
+    _named_paths,
     _narrow_to_path_targets,
     _quiet_mapper_logs,
     _resolve_capability_paths,
@@ -50,7 +53,6 @@ from reporails_cli.interfaces.cli.check_orchestration import (
 )
 from reporails_cli.interfaces.cli.check_support import (
     _ensure_model_or_exit,
-    _generic_scan_file_types,
     _heal_authed,
 )
 from reporails_cli.interfaces.cli.helpers import (
@@ -108,8 +110,7 @@ class CheckScope:
     assumed: bool = False
     mixed: bool = False
     filtered: list[Any] = field(default_factory=list)
-    excl: Any = ()
-    excl_files: Any = ()
+    exclusions: Any = None
     instruction_files: list[Path] = field(default_factory=list)
     upfront_paths: set[Path] = field(default_factory=set)
     is_targeted: bool = False
@@ -128,6 +129,7 @@ class CheckPipeline:
     content_findings: list[Any] = field(default_factory=list)
     client_findings: list[Any] = field(default_factory=list)
     rule_agents: tuple[str, ...] = ()
+    not_evaluated: tuple[tuple[str, str], ...] = ()
     lint_result: Any = None
     funnel_error: Any = None
     notices: tuple[Any, ...] = ()
@@ -141,8 +143,12 @@ class CheckRender:
     display_result: Any = None
     display_map: Any = None
     capability_paths: set[Path] = field(default_factory=set)
+    # The `(folders, file globs)` the run left out because the user set them, recorded where scope resolves.
+    excluded: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
     elapsed_ms: float = 0.0
     heal_authed: bool = False
+    # Announcements are left out of this run's notices (`--no-promo`).
+    no_promo: bool = False
 
 
 @dataclass
@@ -210,7 +216,7 @@ def _flow_targets(state: CheckState) -> None:
         raise typer.Exit(2)
 
 
-def _resolve_scope_at_target(state: CheckState) -> None:
+def _resolve_scope_at_target(state: CheckState, capability_paths: frozenset[Path] = frozenset()) -> None:
     """Detect agents at the current scan root and discover the scannable files under it.
 
     The scope includes each agent's config surfaces (hooks, permissions, MCP
@@ -224,20 +230,19 @@ def _resolve_scope_at_target(state: CheckState) -> None:
     config = get_project_config(state.targets.target)
     state.scope.generic_scanning = bool(config.generic_scanning)
     agent_arg = state.inputs.agent or config.default_agent
-    state.scope.excl = state.inputs.exclude_dirs if state.inputs.exclude_dirs is not None else config.exclude_dirs
-    state.scope.excl_files = (
-        state.inputs.exclude_files if state.inputs.exclude_files is not None else config.exclude_files
-    )
     if agent_arg:
         _validate_agent(agent_arg, console)
-    found = discover_scope(state.targets.target, agent_arg, state.scope.excl, state.scope.excl_files)
-    state.scope.detected = found.detected
+    # A single file is checked whatever is excluded, so its pass lists nothing and records nothing.
+    flags, named = (state.inputs.exclude_dirs, state.inputs.exclude_files), _named_paths(state, capability_paths)
+    scan = not state.targets.single_file
+    found = discover_scope(state.targets.target, agent_arg, *flags, scan_files=scan, named=named, narrowed=bool(named))
+    state.render.excluded, state.scope.exclusions = found.excluded, found.exclusions
+    state.scope.detected, state.scope.filtered = found.detected, found.filtered
     state.scope.effective_agent, state.scope.assumed, state.scope.mixed = (
         found.effective_agent,
         found.assumed,
         found.mixed,
     )
-    state.scope.filtered = found.filtered
     state.scope.instruction_files = found.files
     if state.targets.single_file is not None:
         state.scope.instruction_files = [safe_resolve(state.targets.single_file)]
@@ -250,13 +255,14 @@ def _resolve_scope_at_target(state: CheckState) -> None:
 def _flow_scope(state: CheckState) -> bool:
     """Detect agents, discover instruction files, narrow to scope. False = nothing in scope."""
     _resolve_scope_at_target(state)
-    if not state.scope.instruction_files:
-        _emit_empty_run(state)
-        return False
-
     # A scope-to-subtree run keeps the project scan root, so its narrowing runs here
     # with the capability/multi-path narrowing rather than through the re-root branch.
-    if (state.targets.single_path is None or state.targets.subtree_scoped) and not _narrow_upfront(state):
+    narrows = state.targets.single_path is None or state.targets.subtree_scoped
+    named_targets = bool(state.targets.capability_specs or state.targets.path_targets)
+    if not state.scope.instruction_files and not (narrows and named_targets):
+        _emit_empty_run(state)
+        return False
+    if narrows and not _narrow_upfront(state):
         return False
 
     return _apply_generic_scan(state)
@@ -275,10 +281,15 @@ def _narrow_upfront(state: CheckState) -> bool:
         raise typer.Exit(2)
     if state.targets.capability_specs:
         cap_paths, unresolved_skills = _resolve_capability_paths(
-            state.targets.capability_specs, state.scope.effective_agent, state.inputs.project_root, state.scope.excl
+            state.targets.capability_specs,
+            state.scope.effective_agent,
+            state.inputs.project_root,
+            state.scope.exclusions,
         )
         state.scope.upfront_paths |= cap_paths
         _warn_unresolved_skills(unresolved_skills, state.inputs.project_root)
+    if cap_paths:
+        _resolve_scope_at_target(state, frozenset(cap_paths))
     if state.targets.path_targets:
         state.scope.upfront_paths |= set(
             _narrow_to_path_targets(state.scope.instruction_files, state.targets.path_targets)
@@ -288,7 +299,7 @@ def _narrow_upfront(state: CheckState) -> bool:
         return False
     if state.scope.upfront_paths:
         state.scope.instruction_files = [f for f in state.scope.instruction_files if f in state.scope.upfront_paths]
-        # Capability targets are authoritative — keep resolved targets broad discovery dropped.
+        # A capability target is checked even when no agent's file list holds it (a referenced file).
         discovered = {safe_resolve(f) for f in state.scope.instruction_files}
         state.scope.instruction_files += [p for p in cap_paths if safe_resolve(p) not in discovered]
         if not state.scope.instruction_files:
@@ -299,15 +310,13 @@ def _narrow_upfront(state: CheckState) -> bool:
 
 def _apply_generic_scan(state: CheckState) -> bool:
     """Fold @-import-reached files into the scored set and compute is_targeted. Always True."""
-    import_extra, state.scope.file_type_by_path = _generic_scan_file_types(
-        state.targets.target, state.scope.instruction_files, state.scope.effective_agent, state.scope.generic_scanning
+    import_extra, state.scope.file_type_by_path = apply_generic_scan(
+        state.targets.target,
+        state.scope.instruction_files,
+        state.scope.effective_agent,
+        state.scope.generic_scanning,
+        state.scope.exclusions,
     )
-    if import_extra and state.scope.excl_files:
-        from reporails_cli.core.platform.utils.utils import matches_any_glob
-
-        import_extra = [
-            f for f in import_extra if not matches_any_glob(f, state.scope.excl_files, state.targets.target)
-        ]
     if import_extra:
         state.scope.instruction_files = list(state.scope.instruction_files) + import_extra
     state.scope.is_targeted = (
@@ -341,10 +350,10 @@ def _flow_pipeline(state: CheckState) -> None:
     from reporails_cli.core.platform.observability.stage_timer import get_stage_timer
 
     state.pipeline.start_time = time.perf_counter()
-    import os
+    from reporails_cli.core.platform.config.bootstrap import env_flag
 
     state.pipeline.stage_timer = get_stage_timer()
-    state.pipeline.stage_timer.configure(enabled=bool(os.environ.get("AILS_STAGE_TIMING")))
+    state.pipeline.stage_timer.configure(enabled=env_flag("AILS_STAGE_TIMING"))
 
     show_progress = sys.stdout.isatty() and state.targets.output_format not in ("json", "github")
     progress: Callable[[str], None] = (
@@ -384,9 +393,15 @@ def _flow_pipeline(state: CheckState) -> None:
         pairs = _agent_file_pairs(state)
         state.pipeline.rule_agents = tuple(dict.fromkeys(agent_id for agent_id, _ in pairs))
         skills = skill_membership(state.pipeline.ruleset_map)
-        state.pipeline.m_findings = run_m_probes_over_pairs(
-            state.targets.target, pairs, scoped=state.scope.is_targeted, skills=skills
-        )
+        with not_evaluated_scope() as unfinished:
+            state.pipeline.m_findings = run_m_probes_over_pairs(
+                state.targets.target,
+                pairs,
+                scoped=state.scope.is_targeted,
+                skills=skills,
+                exclusions=state.scope.exclusions,
+            )
+        state.pipeline.not_evaluated = tuple(unfinished)
         state.pipeline.stage_timer.mark("m_probe")
 
         if state.pipeline.ruleset_map is not None:
@@ -415,7 +430,7 @@ def _run_content_checks(state: CheckState) -> None:
         finding
         for agent_id, files in _agent_file_pairs(state)
         for finding in run_content_quality_checks(
-            state.pipeline.ruleset_map, state.targets.target, files, agent=agent_id
+            state.pipeline.ruleset_map, state.targets.target, files, agent=agent_id, exclusions=state.scope.exclusions
         )
     ]
     state.pipeline.client_findings = run_client_checks(state.pipeline.ruleset_map)
@@ -425,6 +440,7 @@ def _flow_server_lint(state: CheckState, show_progress: bool, spinner: Any) -> N
     """Send local findings to the server and unpack the lint response onto the pipeline state."""
     from reporails_cli.core.pipeline.assemble import lint_request_local
     from reporails_cli.core.platform.adapters.api_client import AilsClient
+    from reporails_cli.core.platform.adapters.notices_seen import visible_notices
 
     if show_progress:
         spinner.update("[bold]Diagnosing...[/bold]")
@@ -434,7 +450,7 @@ def _flow_server_lint(state: CheckState, show_progress: bool, spinner: Any) -> N
         response = AilsClient().lint(state.pipeline.ruleset_map, local, structural_required, root=state.targets.target)
     state.pipeline.lint_result = response.result if response else None
     state.pipeline.funnel_error = response.funnel_error if response else None
-    state.pipeline.notices = response.notices if response else ()
+    state.pipeline.notices = visible_notices(response.notices if response else (), no_promo=state.render.no_promo)
     state.pipeline.stage_timer.mark("server")
 
 
@@ -455,6 +471,7 @@ def _assemble_inputs(state: CheckState, lint_result: Any = None) -> Any:
         alias_fn=rule_aliases,
         rule_agents=state.pipeline.rule_agents,
         notices=state.pipeline.notices,
+        not_evaluated=state.pipeline.not_evaluated,
     )
 
 
@@ -465,10 +482,13 @@ def _flow_assemble(state: CheckState) -> None:
     assemble spine shared with the MCP `validate` tool (`core/pipeline/assemble.py`); the
     display-path filtering below stays CLI-only.
     """
-    from reporails_cli.core.pipeline.assemble import assemble_result
+    from reporails_cli.core.pipeline.assemble import assemble_result, with_exclusions
     from reporails_cli.formatters.text.display import filter_result_to_paths, filter_ruleset_map_to_paths
 
-    state.render.result = assemble_result(_assemble_inputs(state, state.pipeline.lint_result))
+    state.render.result = with_exclusions(
+        assemble_result(_assemble_inputs(state, state.pipeline.lint_result), state.scope.exclusions),
+        state.render.excluded,
+    )
     # `assemble_result` unpacks the lint result (report/hints/cross_file_coordinates/tier)
     # and attaches the composable remediation `workflow` itself; the path filter below
     # preserves it via `dataclasses.replace`.
@@ -547,9 +567,8 @@ def _flow_heal(state: CheckState) -> None:
     _notify_heal_scope_skips(len(candidate) - len(heal_files), state.targets.output_format)
     _run_heal_pass(
         state.targets.target,
-        heal_files,
+        HealScope(heal_files, state.scope.effective_agent, state.scope.exclusions),
         state.pipeline.ruleset_map,
-        state.scope.effective_agent,
         state.inputs.dry_run,
         state.targets.output_format,
         state.render.result.notices,

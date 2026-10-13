@@ -571,3 +571,34 @@ def test_the_old_auth_group_is_gone() -> None:
 def test_login_and_logout_are_listed_in_account_and_setup() -> None:
     panels = {c.name: c.rich_help_panel for c in app.registered_commands}
     assert panels["login"] == panels["logout"] == "Account & setup"
+
+
+def _login_with_promo(site: _Site, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    promo = Notice("ad", "info", "Fixture promo", "", kind="promo")
+    warn = Notice("pay", "warn", "Payment failed", "")
+    site.polls = [_signed_in("free", (promo, warn))]
+    return runner.invoke(app, ["login"]).output
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_cli_ux
+def test_login_hides_a_promo_with_the_env_var_and_does_not_record_it(
+    site: _Site, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("AILS_NO_PROMO", "1")
+    out = _login_with_promo(site, monkeypatch, tmp_path)
+    assert "Fixture promo" not in out
+    assert "Payment failed" in out
+    seen = tmp_path / ".reporails" / "notices-seen.json"
+    assert "ad" not in (seen.read_text(encoding="utf-8") if seen.exists() else "")
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_cli_ux
+def test_login_shows_a_promo_without_the_env_var(site: _Site, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("AILS_NO_PROMO", raising=False)
+    out = _login_with_promo(site, monkeypatch, tmp_path)
+    assert "Fixture promo" in out
+    assert "Payment failed" in out

@@ -15,6 +15,7 @@ the response envelope. Only the surface-agnostic assemble tail lives here.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -28,6 +29,7 @@ from reporails_cli.core.discovery.walk import safe_resolve
 from reporails_cli.core.platform.policy.levels import determine_level_from_gates
 
 if TYPE_CHECKING:
+    from reporails_cli.core.discovery.exclusions import RunExclusions
     from reporails_cli.core.platform.dto.diagnostics import Diagnostic, LintResult, Notice, RulesetReport
 
 
@@ -59,9 +61,11 @@ class AssembleInputs:
     alias_fn: Callable[[str], set[str]]
     rule_agents: tuple[str, ...] = ()
     notices: tuple[Notice, ...] = ()
+    # `(rule id, file)` pairs whose check did not finish in time; the file is as the check reported it.
+    not_evaluated: tuple[tuple[str, str], ...] = ()
 
 
-def assemble_result(inp: AssembleInputs) -> Any:
+def assemble_result(inp: AssembleInputs, exclusions: RunExclusions | None = None) -> Any:
     """Fold memory findings + level, merge local + server findings, suppress and mutate.
 
     Returns the merged ``CombinedResult`` after inline suppressions and surface-scoped
@@ -70,7 +74,8 @@ def assemble_result(inp: AssembleInputs) -> Any:
     workflow's grade stamped on each local finding it serves and the reply's grade stamped on
     each other local finding it names. A finding the reply does not grade, and every finding of
     an offline run, carries no grade. Memory validation runs whenever a ruleset map is present,
-    and the computed level is always threaded onto the merged result.
+    and the computed level is always threaded onto the merged result. `exclusions` is what the run left out: a
+    capability folder it names is not counted as present, and an import from a left-out file is flagged.
     """
     from reporails_cli.core.lint.memory_checks import validate_memory_files
     from reporails_cli.core.lint.suppression import apply_config_listing, apply_suppressions
@@ -88,7 +93,7 @@ def assemble_result(inp: AssembleInputs) -> Any:
     if inp.ruleset_map is not None:
         memory_findings = validate_memory_files(inp.ruleset_map.files)
 
-    features = detect_features_filesystem(inp.scan_root, agents=inp.filter_agents)
+    features = detect_features_filesystem(inp.scan_root, agents=inp.filter_agents, exclusions=exclusions)
     level = determine_level_from_gates(features)
 
     all_client_findings = inp.content_findings + inp.client_findings + memory_findings
@@ -105,9 +110,9 @@ def assemble_result(inp: AssembleInputs) -> Any:
         level=level,
         tier=lint_result.tier if lint_result else "",
     )
-    result = replace(result, hooks=features.hooks)
+    result = replace(result, hooks=features.hooks, excluded_imported=_imports_left_out(inp, exclusions))
     result = _drop_dependent(result, inp)
-    result = replace(result, notices=inp.notices)
+    result = replace(result, notices=inp.notices, not_evaluated=_relative_pairs(inp.not_evaluated, inp.scan_root))
     # The workflow goes on first, so the suppressions the author wrote apply to what it lists too.
     if lint_result is not None and lint_result.workflow is not None:
         result = replace(result, workflow=lint_result.workflow)
@@ -123,6 +128,37 @@ def assemble_result(inp: AssembleInputs) -> Any:
     return replace(result, stats=replace(result.stats, agents=_rule_agents(inp)))
 
 
+def with_exclusions(result: Any, exclusions: tuple[tuple[str, ...], tuple[str, ...]]) -> Any:
+    """`result` stating the `(folders, file globs)` the run left out."""
+    dirs, files = exclusions
+    return replace(
+        result,
+        excluded_dirs=dirs,
+        excluded_files=files,
+        excluded_imported=result.excluded_imported and bool(dirs or files),
+    )
+
+
+def _imported_source(atom: Any) -> str:
+    """The path an atom's imported text comes from, next to the importing file's real location."""
+    return str(os.path.normpath(safe_resolve(Path(atom.file_path)).parent / atom.imported_from))
+
+
+def _imports_left_out(inp: AssembleInputs, exclusions: RunExclusions | None) -> bool:
+    """True when an instruction in a checked file comes from a file the run left out."""
+    if exclusions is None or inp.ruleset_map is None:
+        return False
+    sources = {_imported_source(atom) for atom in getattr(inp.ruleset_map, "atoms", ()) if atom.imported_from}
+    return any(exclusions.leaves_out(inp.scan_root / source) for source in sources)
+
+
+def _relative_pairs(pairs: tuple[tuple[str, str], ...], scan_root: Path) -> tuple[tuple[str, str], ...]:
+    """`pairs` with each file given project-relative, as findings are; repeats dropped, order kept."""
+    from reporails_cli.core.platform.runtime.merger import normalize_finding_path
+
+    return tuple(dict.fromkeys((rule, normalize_finding_path(file, scan_root)) for rule, file in pairs))
+
+
 # How long a quoted instruction may run in a finding that names where it is written.
 _QUOTE_MAX_CHARS = 80
 
@@ -131,7 +167,7 @@ def _imported_note(atom: Any, scan_root: Path) -> str:
     """` (from docs/style.md:7: "Keep the diff small.")` — where an imported instruction is written."""
     from reporails_cli.core.platform.runtime.merger import normalize_finding_path
 
-    where = normalize_finding_path((Path(atom.file_path).parent / atom.imported_from).as_posix(), scan_root)
+    where = normalize_finding_path(Path(_imported_source(atom)).as_posix(), scan_root)
     text = " ".join(atom.text.split())
     quote = text if len(text) <= _QUOTE_MAX_CHARS else text[: _QUOTE_MAX_CHARS - 1].rstrip() + "…"
     return f' (from {where}:{atom.imported_line}: "{quote}")'

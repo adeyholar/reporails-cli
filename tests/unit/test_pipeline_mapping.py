@@ -676,7 +676,7 @@ def test_resolve_agent_filters_keeps_generic_scope_when_nothing_distinctive_dete
     scope."""
     generic = _detected("generic", ["/proj/AGENTS.md"])
 
-    effective, _assumed, mixed, filtered = mapping.resolve_agent_filters("", [generic], Path("/proj"), None, None)
+    effective, _assumed, mixed, filtered = mapping.resolve_agent_filters("", [generic], Path("/proj"))
 
     assert [d.agent_type.id for d in filtered] == ["generic"]
     assert effective == "generic"
@@ -692,7 +692,7 @@ def test_resolve_agent_filters_keeps_generics_own_files_beside_a_named_agent():
     claude = _detected("claude", ["/proj/CLAUDE.md"])
     generic = _detected("generic", ["/proj/AGENTS.md"])
 
-    _, _, _, filtered = mapping.resolve_agent_filters("", [claude, generic], Path("/proj"), None, None)
+    _, _, _, filtered = mapping.resolve_agent_filters("", [claude, generic], Path("/proj"))
 
     assert [d.agent_type.id for d in filtered] == ["claude", "generic"]
 

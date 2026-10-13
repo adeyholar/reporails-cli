@@ -188,3 +188,51 @@ def test_an_unrecognised_4xx_keeps_the_bug_report_invitation() -> None:
     err = parse_error_body(418, json.dumps({"error": "teapot"}))
     assert err is not None
     assert "Did you see an error" in _render(err)
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_api
+@pytest.mark.parametrize(
+    ("status", "token", "retry_after", "reset_in", "retryable"),
+    [
+        (504, "scoring_timeout", None, 10, True),
+        (503, "server_busy", "7", 7, True),
+        (413, "scoring_limit_exceeded", None, 0, False),
+    ],
+)
+def test_a_refusal_naming_its_token_under_detail_is_parsed(
+    status: int, token: str, retry_after: str | None, reset_in: int, retryable: bool
+) -> None:
+    err = parse_error_body(status, json.dumps({"detail": token}), retry_after)
+    assert err is not None
+    assert (err.error, err.status, err.reset_in, err.retryable) == (token, status, reset_in, retryable)
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_api
+def test_a_validation_list_under_detail_stays_unknown() -> None:
+    body = json.dumps({"detail": [{"loc": ["body", "atoms"], "msg": "field required", "type": "missing"}]})
+    err = parse_error_body(422, body)
+    assert err is not None
+    assert err.error == "unknown_error"
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_api
+def test_error_key_wins_over_detail() -> None:
+    err = parse_error_body(504, json.dumps({"error": "scoring_timeout", "detail": "server_busy"}))
+    assert err is not None
+    assert err.error == "scoring_timeout"
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_api
+@pytest.mark.parametrize(
+    ("status", "token", "headers"),
+    [(504, "scoring_timeout", {}), (503, "server_busy", {"Retry-After": "7"})],
+)
+def test_client_reports_a_detail_body_refusal_as_retryable(status: int, token: str, headers: dict[str, str]) -> None:
+    err = _lint(lambda *a, **k: _Reply(status, {"detail": token}, headers))
+    assert err.error == token
+    assert err.error != "http_error"
+    assert err.retryable

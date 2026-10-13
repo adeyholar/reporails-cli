@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from reporails_cli.core.discovery.agents import load_project_exclude_dirs
+from reporails_cli.core.discovery.exclusions import RunExclusions, load_run_exclusions
 from reporails_cli.core.discovery.walk import safe_resolve, walk_glob_matches
 from reporails_cli.core.mapper.skills import skill_entry_paths
 from reporails_cli.core.platform.dto.checks import CheckResult
@@ -21,15 +21,23 @@ def _safe_float(value: Any, default: float = float("inf")) -> float:
         return default
 
 
-def _resolve_glob_targets(pattern: str, root: Path) -> list[Path]:
+def run_exclusions(args: dict[str, Any], root: Path) -> RunExclusions:
+    """What the run leaves out: the set handed in `args`, else the project's configured exclusions."""
+    given = args.get("_exclusions")
+    return given if isinstance(given, RunExclusions) else load_run_exclusions(root)
+
+
+def _resolve_glob_targets(pattern: str, root: Path, exclusions: RunExclusions | None = None) -> list[Path]:
     """Resolve a glob pattern relative to root: the regular files it matches, not entering
-    any folder in the project's exclude_dirs.
+    any folder `exclusions` leaves out and dropping matches it leaves out (`None` reads the
+    project's configured exclusions).
 
     Hidden folders such as `.claude/` and `.cursor/` are walked, so `**/*.md`
     matches files under them. The intersection with `classified_files` in
     `get_target_files` bounds the result back to in-scope instruction files.
     """
-    return list(walk_glob_matches(root, pattern, load_project_exclude_dirs(root)))
+    exclusions = exclusions or load_run_exclusions(root)
+    return [m for m in walk_glob_matches(root, pattern, exclusions.feature_walk_dirs) if not exclusions.leaves_out(m)]
 
 
 def get_target_files(
@@ -71,7 +79,7 @@ def _select_targets(
     """
     path_pattern = args.get("path", "")
     if path_pattern:
-        glob_targets = _resolve_glob_targets(str(path_pattern), root)
+        glob_targets = _resolve_glob_targets(str(path_pattern), root, run_exclusions(args, root))
         if not classified_files:
             return glob_targets
         allowed: set[Path] = set()
@@ -113,7 +121,7 @@ def _get_counted_files(
     raw_pattern = str(args.get("pattern", ""))
     if raw_pattern:
         all_files: set[Path] = set()
-        all_files.update(m for m in _resolve_glob_targets(raw_pattern, root) if m.is_file())
+        all_files.update(m for m in _resolve_glob_targets(raw_pattern, root, run_exclusions(args, root)) if m.is_file())
         return all_files
 
     if classified_files:

@@ -81,6 +81,25 @@ def test_paid_view_renders_every_section_in_order() -> None:
 
 @pytest.mark.unit
 @pytest.mark.subsys_server
+def test_a_promo_notice_is_labelled_promo_and_the_rest_keep_their_level() -> None:
+    notices = [
+        {"id": "ad", "level": "info", "text": "Fixture promo", "url": "https://ad.example", "kind": "promo"},
+        {"id": "pay", "level": "warn", "text": "Payment failed", "url": "", "kind": "notice"},
+        {"id": "ends", "level": "info", "text": "Pro ends soon", "url": "", "kind": "notice"},
+        {"id": "old", "level": "warn", "text": "No kind here"},
+    ]
+    lines = render_text_view({"notices": notices}).split("\n")
+    assert lines == [
+        "notices:",
+        "  - promo: Fixture promo (https://ad.example)",
+        "  - warn: Payment failed",
+        "  - info: Pro ends soon",
+        "  - warn: No kind here",
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_server
 def test_absent_sections_are_left_out() -> None:
     assert render_text_view({"workflow": {"locations": []}}) == ""
     text = render_text_view({"tier": "pro", "workflow": {"summary": "s"}})
@@ -338,3 +357,38 @@ def test_location_detail_does_not_count_toward_the_table_budget() -> None:
     lines = render_text_view({"workflow": {"locations": detailed}}).split("\n")
     assert [line for line in lines if not line.startswith("      ")] == locations_block(plain)
     assert len(lines) > 150
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_server
+def test_not_evaluated_is_named_per_file() -> None:
+    payload = {
+        "workflow": {},
+        "not_evaluated": [
+            {"rule": "CORE:C:0037", "file": "docs/big.md"},
+            {"rule": "CORE:C:0038", "file": "docs/big.md"},
+            {"rule": "CORE:C:0037", "file": "a.md"},
+        ],
+    }
+    lines = render_text_view(payload).splitlines()
+    assert "Not evaluated in docs/big.md: CORE:C:0037, CORE:C:0038 — these checks did not finish in time" in lines
+    assert "Not evaluated in a.md: CORE:C:0037 — the check did not finish in time" in lines
+    assert "Not evaluated" not in render_text_view({"workflow": {}, "not_evaluated": []})
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_server
+def test_excluded_line_names_what_was_left_out() -> None:
+    payload = {"workflow": {}, "quality": 7.5, "excluded": {"dirs": ["agents"], "files": ["*.generated.md"]}}
+    assert (
+        "excluded: agents/, *.generated.md — not checked; the score covers the rest"
+        in render_text_view(payload).splitlines()
+    )
+    assert "excluded" not in render_text_view({"workflow": {}, "excluded": {"dirs": [], "files": []}})
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_server
+def test_excluded_line_without_a_score_does_not_claim_one() -> None:
+    payload = {"workflow": {}, "quality": None, "excluded": {"dirs": ["agents"], "files": []}}
+    assert "excluded: agents/ — not checked" in render_text_view(payload).splitlines()

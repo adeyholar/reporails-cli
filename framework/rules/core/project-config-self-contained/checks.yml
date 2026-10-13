@@ -4,6 +4,6 @@ checks:
   check: file_exists
 - id: CORE.G.0007.pattern_check
   type: deterministic
-  pattern-regex: (?i)(~/|\$HOME\b|\benv\s+var\b|\brequires?\s+.*\binstall)
+  pattern-regex: (?i)(~/|\$HOME\b|\benv\s+var\b|\brequires?[ \t]+(?:[^\nr]|r(?!equires?\b)){0,120}?\binstall)
   expect: absent
   message: External dependency detected — config must be self-contained

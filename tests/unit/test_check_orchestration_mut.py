@@ -288,7 +288,7 @@ def _run_heal_capture(monkeypatch, *, isatty, output_format):
     monkeypatch.setattr(heal, "_collect_section_suggestions", lambda *a, **k: [])
     monkeypatch.setattr(heal, "_output_heal_results", lambda *a, **k: None)
     monkeypatch.setattr(orch.sys.stdout, "isatty", lambda: isatty, raising=False)
-    orch._run_heal_pass(Path("."), [], object(), "claude", True, output_format)
+    orch._run_heal_pass(Path("."), orch.HealScope([], "claude"), object(), True, output_format)
     return captured["show"]
 
 

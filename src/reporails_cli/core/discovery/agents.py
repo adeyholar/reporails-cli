@@ -14,16 +14,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from reporails_cli.core.discovery import plugin_roots as _plugin_roots
-from reporails_cli.core.discovery.agent_discovery import _agent_namespace, is_excluded
+from reporails_cli.core.discovery.agent_discovery import _agent_namespace
 from reporails_cli.core.discovery.agent_discovery import categorize_file_type as _categorize_file_type
 from reporails_cli.core.discovery.agent_discovery import config_names_agent as _config_names_agent
 from reporails_cli.core.discovery.agent_discovery import discover_from_config as _discover_from_config
 from reporails_cli.core.discovery.agent_markers import agent_has_marker, dir_prefix_from_glob
+from reporails_cli.core.discovery.exclusions import load_run_exclusions
 from reporails_cli.core.discovery.file_aliases import _dedupe_with_aliases, _store_alias_cache, clear_alias_cache
 from reporails_cli.core.platform.config.config import get_project_config
-from reporails_cli.core.platform.utils.utils import matches_any_glob
 
 if TYPE_CHECKING:
+    from reporails_cli.core.discovery.exclusions import RunExclusions
     from reporails_cli.core.platform.dto.results import ProjectConfig
 
 logger = logging.getLogger(__name__)
@@ -206,49 +207,9 @@ def clear_agent_cache() -> None:
 # ─── Public API ─────────────────────────────────────────────────────────
 
 
-DEFAULT_EXCLUDE_DIRS: frozenset[str] = frozenset(
-    {
-        # VCS
-        ".git",
-        ".svn",
-        ".hg",
-        # Python
-        "__pycache__",
-        ".venv",
-        "venv",
-        ".env",
-        ".mypy_cache",
-        ".ruff_cache",
-        ".pytest_cache",
-        # JS/TS
-        "node_modules",
-        # Build output
-        "dist",
-        "build",
-        "target",
-        "out",
-        # Data / artifacts (instruction files never live here)
-        "data",
-        "datasets",
-        # Vendored
-        "vendor",
-        # IDE / OS
-        ".idea",
-        # `.vscode` is deliberately absent: Copilot declares real config/mcp
-        # surfaces there (`.vscode/{settings,mcp}.json`), pre-filtered out otherwise.
-    }
-)
-
-
 def load_project_exclude_dirs(target: Path) -> frozenset[str]:
-    """The built-in default excludes plus the project's `exclude_dirs`.
-
-    Built-in defaults cover directories that never contain instruction files
-    (VCS internals, caches, node_modules, data). The project's `exclude_dirs`
-    (`.ails/config.yml`, `.ails/config.local.yml` and the global config)
-    extend — not replace — these defaults.
-    """
-    return DEFAULT_EXCLUDE_DIRS | frozenset(get_project_config(target).exclude_dirs)
+    """The built-in default excludes plus the project's `exclude_dirs`."""
+    return load_run_exclusions(target).walk_dirs
 
 
 def detect_agents(
@@ -482,39 +443,24 @@ def filter_agents_by_id(agents: list[DetectedAgent], agent_id: str) -> list[Dete
 
 
 def _drop_agent_files(agents: list[DetectedAgent], drop: Any) -> list[DetectedAgent]:
-    """Each agent with the instruction and rule files `drop(path)` rejects removed; an
-    agent left with no instruction file is dropped."""
+    """Each agent with the instruction, rule and config files `drop(path)` rejects removed. An
+    agent is kept while at least one instruction or rule file survives, and dropped when
+    none does."""
     filtered: list[DetectedAgent] = []
     for agent in agents:
         inst = [f for f in agent.instruction_files if not drop(f)]
-        if inst:  # Only keep agent if it still has instruction files
-            rules = [f for f in agent.rule_files if not drop(f)]
-            filtered.append(
-                DetectedAgent(agent.agent_type, inst, agent.config_files, rules, agent.detected_directories)
-            )
+        rules = [f for f in agent.rule_files if not drop(f)]
+        configs = [f for f in agent.config_files if not drop(f)]
+        if inst or rules:
+            filtered.append(DetectedAgent(agent.agent_type, inst, configs, rules, agent.detected_directories))
     return filtered
 
 
-def filter_agents_by_exclude_dirs(
-    agents: list[DetectedAgent],
-    target: Path,
-    exclude_dirs: frozenset[str],
-) -> list[DetectedAgent]:
-    """Remove files in excluded directories. Drops agents with no remaining files."""
-    if not exclude_dirs:
+def filter_agents_by_exclusions(agents: list[DetectedAgent], exclusions: RunExclusions) -> list[DetectedAgent]:
+    """Remove the files the run's exclusions leave out. Drops an agent left with no instruction or rule files."""
+    if not exclusions.dirs and not exclusions.files:
         return agents
-    return _drop_agent_files(agents, lambda f: is_excluded(f, target, exclude_dirs))
-
-
-def filter_agents_by_exclude_files(
-    agents: list[DetectedAgent],
-    target: Path,
-    exclude_files: list[str] | None,
-) -> list[DetectedAgent]:
-    """Remove files matching an exclude glob (rel. to target). Drops agents with no remaining files."""
-    if not exclude_files:
-        return agents
-    return _drop_agent_files(agents, lambda f: matches_any_glob(f, exclude_files, target))
+    return _drop_agent_files(agents, exclusions.leaves_out)
 
 
 def get_all_instruction_files(target: Path, agents: list[DetectedAgent] | None = None) -> list[Path]:

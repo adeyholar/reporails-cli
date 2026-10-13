@@ -29,8 +29,14 @@ from reporails_cli.interfaces.mcp import tools
 WARN = Notice("pay", "warn", "Payment failed [bold]x[/bold]", "https://example.test/pay")
 INFO = Notice("ends", "info", "Pro ends on 1 June")
 RAW = [
-    {"id": "pay", "level": "warn", "text": "Payment failed [bold]x[/bold]", "url": "https://example.test/pay"},
-    {"id": "ends", "level": "info", "text": "Pro ends on 1 June", "url": ""},
+    {
+        "id": "pay",
+        "level": "warn",
+        "text": "Payment failed [bold]x[/bold]",
+        "url": "https://example.test/pay",
+        "kind": "notice",
+    },
+    {"id": "ends", "level": "info", "text": "Pro ends on 1 June", "url": "", "kind": "notice"},
 ]
 STILL_REACHING = "Your sign-in is still reaching the server"
 runner = CliRunner()
@@ -237,3 +243,78 @@ def test_other_rejections_are_not_reworded_after_sign_in() -> None:
     err = _lint(429, {"error": "rate_limit_exceeded", "message": "Slow down"}, {}, key="k1").funnel_error
     assert err is not None
     assert err.message == "Slow down"
+
+
+# --- announcements --------------------------------------------------------------------------
+
+PROMO = Notice("ad", "info", "Fixture promo [bold]x[/bold]", "https://example.test/ad", kind="promo")
+
+
+@pytest.fixture
+def promo_project(project: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.delenv("AILS_NO_PROMO", raising=False)
+    monkeypatch.setattr(
+        AilsClient, "lint", lambda *_a, **_k: LintResponse(funnel_error=None, result=None, notices=(WARN, PROMO))
+    )
+    return project
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_cli_ux
+def test_no_promo_flag_hides_a_promo_and_keeps_the_warning(promo_project: Path) -> None:
+    result = runner.invoke(app, ["check", "-f", "text", "--no-promo"])
+    assert result.exit_code == 0, result.output
+    assert "Fixture promo" not in result.output
+    assert "Payment failed [bold]x[/bold]" in result.output
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_cli_ux
+def test_env_var_hides_a_promo_and_keeps_the_warning(promo_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AILS_NO_PROMO", "1")
+    result = runner.invoke(app, ["check", "-f", "text"])
+    assert result.exit_code == 0, result.output
+    assert "Fixture promo" not in result.output
+    assert "Payment failed [bold]x[/bold]" in result.output
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_cli_ux
+def test_text_run_shows_a_promo_once_a_day(promo_project: Path) -> None:
+    assert "Fixture promo [bold]x[/bold]" in _check()
+    assert "Fixture promo" not in _check()
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_cli_ux
+def test_json_run_carries_the_promo_with_its_kind(promo_project: Path) -> None:
+    notices = json.loads(runner.invoke(app, ["check", "-f", "json"]).stdout)["notices"]
+    assert [(n["id"], n["kind"]) for n in notices] == [("pay", "notice"), ("ad", "promo")]
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_cli_ux
+def test_json_run_with_the_flag_leaves_the_promo_out(promo_project: Path) -> None:
+    notices = json.loads(runner.invoke(app, ["check", "-f", "json", "--no-promo"]).stdout)["notices"]
+    assert [n["id"] for n in notices] == ["pay"]
+
+
+def _mcp_notices(monkeypatch: pytest.MonkeyPatch) -> tuple[Notice, ...]:
+    monkeypatch.setattr(
+        tools, "_server_lint", lambda *_a, **_k: LintResponse(funnel_error=None, result=None, notices=(WARN, PROMO))
+    )
+    return tools._server_lint_result(object())[2]
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_server
+def test_mcp_validate_drops_a_promo_with_the_env_var_and_keeps_the_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AILS_NO_PROMO", "1")
+    assert _mcp_notices(monkeypatch) == (WARN,)
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_server
+def test_mcp_validate_keeps_a_promo_without_the_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AILS_NO_PROMO", raising=False)
+    assert _mcp_notices(monkeypatch) == (WARN, PROMO)

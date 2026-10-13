@@ -12,6 +12,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from reporails_cli.core.discovery.exclusions import RunExclusions
 from reporails_cli.core.heal.keyed import put_back_line
 from reporails_cli.formatters.json import format_notices
 
@@ -45,6 +46,7 @@ def _collect_section_suggestions(
     effective_agent: str,
     show_progress: bool,
     console: Any,
+    exclusions: RunExclusions | None = None,
 ) -> list[dict[str, Any]]:
     """Run M probes + content-quality checks and collect missing-section suggestions.
 
@@ -62,13 +64,20 @@ def _collect_section_suggestions(
 
     if show_progress:
         console.print("[bold]Checking for missing sections...[/bold]")
-    findings = run_m_probes(target, instruction_files, agent=effective_agent, skills=skill_membership(ruleset_map))
-    findings += run_content_quality_checks(ruleset_map, target, instruction_files, agent=effective_agent)
+    findings = run_m_probes(
+        target,
+        instruction_files,
+        agent=effective_agent,
+        skills=skill_membership(ruleset_map),
+        exclusions=exclusions,
+    )
+    findings += run_content_quality_checks(
+        ruleset_map, target, instruction_files, agent=effective_agent, exclusions=exclusions
+    )
     findings = _drop_suppressed(findings, target)
 
-    violations = _findings_to_violations(findings)
-    classified_files, rules = _classify_for_suggestions(target, instruction_files, effective_agent)
-    suggestions = suggest_missing_sections(violations, target, classified_files, rules)
+    classified_files, rules = _classify_for_suggestions(target, instruction_files, effective_agent, exclusions)
+    suggestions = suggest_missing_sections(_findings_to_violations(findings), target, classified_files, rules)
     return [
         {"rule_id": s.rule_id, "file_path": s.file_path, "section": s.section, "description": s.description}
         for s in suggestions
@@ -105,7 +114,7 @@ def _findings_to_violations(findings: list[Any]) -> list[Any]:
 
 
 def _classify_for_suggestions(
-    target: Path, instruction_files: list[Path], agent: str
+    target: Path, instruction_files: list[Path], agent: str, exclusions: RunExclusions | None = None
 ) -> tuple[list[Any], dict[str, Any]]:
     """Classify files and load rules so a section suggestion can name the file the
     rule's own `match.type` is about, instead of wherever the underlying finding
@@ -121,7 +130,9 @@ def _classify_for_suggestions(
     except (OSError, ValueError):
         generic_scanning = False
     file_types = load_file_types(agent or "generic")
-    classified = classify_files(target, instruction_files, file_types, generic_scanning=generic_scanning)
+    classified = classify_files(
+        target, instruction_files, file_types, generic_scanning=generic_scanning, exclusions=exclusions
+    )
     rules = load_rules(project_root=target, scan_root=target, agent=agent)
     return classified, rules
 
