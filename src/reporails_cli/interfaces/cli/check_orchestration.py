@@ -83,8 +83,8 @@ def _resolve_capability_paths(
 
 
 def _put_back_named(state: Any, named: set[Path]) -> None:
-    """Return the files and capabilities the user named to the run's scope when its exclusions left
-    them out, and record only what is still left out."""
+    """Add the named files and capabilities that the exclusions left out to the run's scope; the Excluded
+    record keeps only the patterns that no named target matches."""
     from reporails_cli.core.pipeline.mapping import ScopeDiscovery, with_named
 
     scope = state.scope
@@ -98,7 +98,7 @@ def _put_back_named(state: Any, named: set[Path]) -> None:
         state.render.excluded,
         scope.exclusions,
     )
-    found = with_named(found, named)
+    found = with_named(found, named, narrowed=True)
     scope.filtered, scope.instruction_files, state.render.excluded = found.filtered, found.files, found.excluded
 
 

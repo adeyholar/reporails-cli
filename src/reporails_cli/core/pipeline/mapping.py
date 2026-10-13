@@ -34,7 +34,7 @@ class ScopeDiscovery(NamedTuple):
     files: list[Path]
     # The `(folders, file globs)` this pass left out because the user set them; empty when it listed no files.
     excluded: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
-    # The run's exclusions (command line joined with config), applied by discovery, the fold and the link walk.
+    # The run's exclusions: the command-line patterns joined with the project's config.
     exclusions: RunExclusions | None = None
 
 
@@ -63,12 +63,11 @@ def discover_scope(
     return with_named(found, named) if scan_files and named else found
 
 
-def with_named(found: ScopeDiscovery, paths: Iterable[Path]) -> ScopeDiscovery:
-    """`found` with each path the user named put back where the run's exclusions left it out.
+def with_named(found: ScopeDiscovery, paths: Iterable[Path], *, narrowed: bool = False) -> ScopeDiscovery:
+    """`found` with each named path that the exclusions left out added back to the run.
 
-    A path that detection held (a command-line folder or a file glob) returns to the agent that held it;
-    a path the walk never entered (a config folder) joins the effective agent's instruction files.
-    The Excluded record then omits the patterns that matched a named path.
+    With `narrowed` (the run covers only the named targets) the Excluded record drops every pattern
+    a named path matches; otherwise the record keeps every pattern the user set.
     """
     from reporails_cli.core.discovery.agents import DetectedAgent, get_known_agents
     from reporails_cli.core.discovery.walk import safe_resolve
@@ -95,7 +94,7 @@ def with_named(found: ScopeDiscovery, paths: Iterable[Path]) -> ScopeDiscovery:
             getattr(holder, kind).append(path)
         files.append(path)
         held.add(safe_resolve(path))
-    return found._replace(filtered=filtered, files=files, excluded=exclusions.record(named))
+    return found._replace(filtered=filtered, files=files, excluded=exclusions.record(named if narrowed else ()))
 
 
 def _held_by(detected: list[Any], path: Path) -> tuple[str, str] | None:

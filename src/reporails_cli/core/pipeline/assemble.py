@@ -15,6 +15,7 @@ the response envelope. Only the surface-agnostic assemble tail lives here.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -92,7 +93,9 @@ def assemble_result(inp: AssembleInputs, exclusions: RunExclusions | None = None
     if inp.ruleset_map is not None:
         memory_findings = validate_memory_files(inp.ruleset_map.files)
 
-    features = detect_features_filesystem(inp.scan_root, agents=inp.filter_agents, exclusions=exclusions)
+    features = detect_features_filesystem(
+        inp.scan_root, agents=inp.filter_agents, exclusions=exclusions, put_back=_named_files(inp, exclusions)
+    )
     level = determine_level_from_gates(features)
 
     all_client_findings = inp.content_findings + inp.client_findings + memory_findings
@@ -130,19 +133,34 @@ def assemble_result(inp: AssembleInputs, exclusions: RunExclusions | None = None
 def with_exclusions(result: Any, exclusions: tuple[tuple[str, ...], tuple[str, ...]]) -> Any:
     """`result` stating the `(folders, file globs)` the run left out."""
     dirs, files = exclusions
-    return replace(result, excluded_dirs=dirs, excluded_files=files)
+    return replace(
+        result,
+        excluded_dirs=dirs,
+        excluded_files=files,
+        excluded_imported=result.excluded_imported and bool(dirs or files),
+    )
+
+
+def _named_files(inp: AssembleInputs, exclusions: RunExclusions | None) -> frozenset[Path]:
+    """The checked files the exclusions would leave out: the ones the user named."""
+    if exclusions is None or inp.ruleset_map is None:
+        return frozenset()
+    from reporails_cli.core.discovery.walk import safe_resolve
+
+    paths = (inp.scan_root / f.path for f in getattr(inp.ruleset_map, "files", ()))
+    return frozenset(safe_resolve(p) for p in paths if exclusions.leaves_out(p))
 
 
 def _imports_left_out(inp: AssembleInputs, exclusions: RunExclusions | None) -> bool:
     """True when an instruction in a checked file comes from a file the run left out."""
     if exclusions is None or inp.ruleset_map is None:
         return False
-    for atom in getattr(inp.ruleset_map, "atoms", ()):
-        if atom.imported_from:
-            source = Path(atom.file_path).parent / atom.imported_from
-            if exclusions.leaves_out(source if source.is_absolute() else inp.scan_root / source):
-                return True
-    return False
+    sources = {
+        os.path.normpath(Path(atom.file_path).parent / atom.imported_from)
+        for atom in getattr(inp.ruleset_map, "atoms", ())
+        if atom.imported_from
+    }
+    return any(exclusions.leaves_out(inp.scan_root / source) for source in sources)
 
 
 def _relative_pairs(pairs: tuple[tuple[str, str], ...], scan_root: Path) -> tuple[tuple[str, str], ...]:

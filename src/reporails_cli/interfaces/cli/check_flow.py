@@ -254,13 +254,14 @@ def _resolve_scope_at_target(state: CheckState) -> None:
 def _flow_scope(state: CheckState) -> bool:
     """Detect agents, discover instruction files, narrow to scope. False = nothing in scope."""
     _resolve_scope_at_target(state)
-    if not state.scope.instruction_files:
-        _emit_empty_run(state)
-        return False
-
     # A scope-to-subtree run keeps the project scan root, so its narrowing runs here
     # with the capability/multi-path narrowing rather than through the re-root branch.
-    if (state.targets.single_path is None or state.targets.subtree_scoped) and not _narrow_upfront(state):
+    narrows = state.targets.single_path is None or state.targets.subtree_scoped
+    named_targets = bool(state.targets.capability_specs or state.targets.path_targets)
+    if not state.scope.instruction_files and not (narrows and named_targets):
+        _emit_empty_run(state)
+        return False
+    if narrows and not _narrow_upfront(state):
         return False
 
     return _apply_generic_scan(state)

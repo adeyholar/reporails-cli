@@ -384,10 +384,8 @@ def _glob_patterns(
     the project tree — drop patterns that start with `~/`, an absolute
     path outside `project_root`, or `/etc/`-style managed locations.
 
-    `skip_dirs` is the run's walk-pruned folder names — any matched
-    path whose ancestor-chain (relative to project_root) contains a
-    directory name in the set is filtered out so listing-mode matches
-    full-project discovery.
+    `skip_dirs` holds folder names to skip — any matched path with a
+    directory of that name between `project_root` and the file is dropped.
 
     `decl` carries the file_type semantics — when provided, files matched
     via a loose-leaf pattern (`**/X.md` or bare `X.md`) are filtered by the

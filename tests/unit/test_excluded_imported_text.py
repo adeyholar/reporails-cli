@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -83,3 +84,38 @@ def test_feature_detection_ignores_a_flag_excluded_skills_folder(tmp_path: Path)
     assert detect_features_filesystem(tmp_path).has_skills_dir
     left_out = load_run_exclusions(tmp_path, ["skills"], None)
     assert not detect_features_filesystem(tmp_path, exclusions=left_out).has_skills_dir
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_lint
+def test_import_with_parent_hop_is_judged_by_where_it_lands(tmp_path: Path) -> None:
+    left_out = load_run_exclusions(tmp_path, ["sub"], None)
+    atom = SimpleNamespace(file_path=str(tmp_path / "sub" / "CLAUDE.md"), imported_from="../shared/x.md")
+    inp = replace(_inputs(tmp_path, None), ruleset_map=SimpleNamespace(atoms=[atom]))
+    assert not _imports_left_out(inp, left_out)
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_lint
+def test_the_flag_needs_something_listed() -> None:
+    from reporails_cli.core.pipeline.assemble import with_exclusions
+
+    flagged = CombinedResult(excluded_imported=True)
+    assert not with_exclusions(flagged, ((), ())).excluded_imported
+    assert with_exclusions(flagged, (("ext",), ())).excluded_imported
+    assert with_exclusions(flagged, ((), ("a/*.md",))).excluded_imported
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_lint
+def test_a_capability_left_out_by_file_glob_is_not_counted(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "CLAUDE.md").write_text("# P\n\nRun pytest.\n", encoding="utf-8")
+    skill = tmp_path / ".claude" / "skills" / "foo" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("---\nname: foo\ndescription: d\n---\nBody.\n", encoding="utf-8")
+    assert detect_features_filesystem(tmp_path).has_skills_dir
+    left_out = load_run_exclusions(tmp_path, None, [".claude/skills/*/SKILL.md"])
+    assert not detect_features_filesystem(tmp_path, exclusions=left_out).has_skills_dir
+    named = frozenset({skill.resolve()})
+    assert detect_features_filesystem(tmp_path, exclusions=left_out, put_back=named).has_skills_dir

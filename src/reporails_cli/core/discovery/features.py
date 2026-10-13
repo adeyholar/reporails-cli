@@ -115,7 +115,10 @@ def _detect_path_scoped_rules(
 
 
 def detect_features_filesystem(
-    target: Path, agents: list[DetectedAgent] | None = None, exclusions: RunExclusions | None = None
+    target: Path,
+    agents: list[DetectedAgent] | None = None,
+    exclusions: RunExclusions | None = None,
+    put_back: frozenset[Path] = frozenset(),
 ) -> DetectedFeatures:
     """Detect project features from file structure and content.
 
@@ -125,7 +128,8 @@ def detect_features_filesystem(
     Args:
         target: Project root path
         agents: Pre-detected agents (avoids redundant filesystem scan)
-        exclusions: The run's exclusions; a folder it leaves out is not searched (default: the project's config)
+        exclusions: The run's exclusions; a folder or file it leaves out is not counted (default: the project's config)
+        put_back: Resolved files the user named; they count even when the exclusions leave them out
 
     Returns:
         DetectedFeatures with all capability fields populated
@@ -139,7 +143,7 @@ def detect_features_filesystem(
     # gates on its own declared surfaces.
     resolved_agents = agents if agents is not None else detect_agents(target)
     agent_ids = {a.agent_type.id for a in resolved_agents}
-    scan = _SurfaceScan.for_target(target, exclusions)
+    scan = _SurfaceScan.for_target(target, exclusions, put_back)
 
     # Check for CLAUDE.md at root
     root_claude = target / "CLAUDE.md"
@@ -233,6 +237,8 @@ class _SurfaceScan:
     roots already found, so each plugin marker is searched for once."""
 
     exclude_dirs: frozenset[str]
+    exclusions: RunExclusions | None = None
+    put_back: frozenset[Path] = frozenset()
     roots_by_marker: dict[str, list[Path]] = field(default_factory=dict)
     hook_configs: dict[Path, HookConfig | None] = field(default_factory=dict)
 
@@ -242,9 +248,18 @@ class _SurfaceScan:
             self.hook_configs[path] = read_hook_config(path)
         return self.hook_configs[path]
 
+    def keep(self, paths: list[Path]) -> list[Path]:
+        """`paths` without the files the run leaves out, unless the user named them."""
+        if self.exclusions is None:
+            return paths
+        return [p for p in paths if not self.exclusions.leaves_out(p) or safe_resolve(p) in self.put_back]
+
     @classmethod
-    def for_target(cls, target: Path, exclusions: RunExclusions | None = None) -> _SurfaceScan:
-        return cls(exclude_dirs=(exclusions or load_run_exclusions(target)).walk_dirs)
+    def for_target(
+        cls, target: Path, exclusions: RunExclusions | None = None, put_back: frozenset[Path] = frozenset()
+    ) -> _SurfaceScan:
+        exclusions = exclusions or load_run_exclusions(target)
+        return cls(exclude_dirs=exclusions.walk_dirs, exclusions=exclusions, put_back=put_back)
 
 
 def _scan_for(target: Path, scan: _SurfaceScan | None) -> _SurfaceScan:
@@ -286,7 +301,7 @@ def _agent_surface_files(
     patterns = _surface_patterns(target, spec, scan)
     if not patterns:
         return []
-    return glob_file_type_patterns(target, patterns, _extract_properties(spec), scan.exclude_dirs)
+    return scan.keep(glob_file_type_patterns(target, patterns, _extract_properties(spec), scan.exclude_dirs))
 
 
 def _agent_has_surface(target: Path, agent_id: str, surface_name: str, scan: _SurfaceScan | None = None) -> bool:
@@ -322,7 +337,7 @@ def _hook_scope_matches(target: Path, agent_id: str, scan: _SurfaceScan, *, repo
         patterns = _surface_patterns(
             target, {"scopes": {scope: scope_spec}} if scopes else spec, scan, repo_only=repo_only
         )
-        for match in glob_file_type_patterns(target, patterns, props, scan.exclude_dirs):
+        for match in scan.keep(glob_file_type_patterns(target, patterns, props, scan.exclude_dirs)):
             if match not in seen:
                 seen.add(match)
                 found.append((scope, match))
@@ -410,7 +425,7 @@ def _agent_nested_instruction_files(target: Path, agent_id: str, scan: _SurfaceS
         patterns = _surface_patterns(target, ft, scan)
         if not patterns:
             continue
-        found.extend(glob_file_type_patterns(target, patterns, _extract_properties(ft), scan.exclude_dirs))
+        found.extend(scan.keep(glob_file_type_patterns(target, patterns, _extract_properties(ft), scan.exclude_dirs)))
     return found
 
 

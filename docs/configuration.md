@@ -176,7 +176,7 @@ A project over the atom cap gets a ready `--exclude-dirs` command with its refus
 
 Whenever you leave folders or files out — with `--exclude-dirs`, `--exclude-files` or the `exclude_dirs` / `exclude_files` settings — the summary names them on an `Excluded` line under the score, because the score then covers only the rest of the project. The built-in excludes above are not listed. Flags add to the settings: `--exclude-dirs` joins `exclude_dirs` and `--exclude-files` joins `exclude_files`; neither replaces the other.
 
-Text that a checked file pulls in with `@path` from a file you left out still counts inside the file that imports it, and the `Excluded` line then ends with `; imported text in checked files still counts`. With `generic_scanning: true`, a left-out file is not checked through an `@` import or a link either. A capability folder you leave out (such as `.claude/skills/`) is not counted as present, so it does not raise your level.
+Text that a checked file pulls in with `@path` from a file you left out still counts inside the file that imports it, and the `Excluded` line then ends with `; imported text in checked files still counts`. With `generic_scanning: true`, a left-out file is not checked through an `@` import or a link either. A capability you leave out, by folder name (`--exclude-dirs skills`) or by file pattern (`--exclude-files '.claude/skills/**'`), is not counted as present, so it does not raise your level; a file you name on the command line still counts.
 
 ## Excluding individual files
 

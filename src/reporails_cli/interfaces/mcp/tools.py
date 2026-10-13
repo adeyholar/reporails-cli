@@ -523,9 +523,8 @@ def run_pipeline_for_path(
     """Run the pipeline for `path` (directory or file); returns `(payload, ruleset_map,
     file_score)`. `ruleset_map` and `file_score` are `None` on a structured error/needs-install
     payload — the caller checks `"error"` / `"needs_install"` in the payload, as `validate_tool`
-    does. `named` holds files the caller named, which are checked whatever is excluded. This is
-    the one pipeline entry point: `validate_tool`, `validate`'s preservation check, and
-    `remedy_brief`'s per-file runs all call it, never a second code path.
+    does. `named` holds files the caller named, which are checked whatever is excluded; the
+    Excluded record still lists every pattern the user set.
     """
     if not is_initialized():
         return _rules_missing_payload(), None, None
