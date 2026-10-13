@@ -93,9 +93,7 @@ def assemble_result(inp: AssembleInputs, exclusions: RunExclusions | None = None
     if inp.ruleset_map is not None:
         memory_findings = validate_memory_files(inp.ruleset_map.files)
 
-    features = detect_features_filesystem(
-        inp.scan_root, agents=inp.filter_agents, exclusions=exclusions, put_back=_named_files(inp, exclusions)
-    )
+    features = detect_features_filesystem(inp.scan_root, agents=inp.filter_agents, exclusions=exclusions)
     level = determine_level_from_gates(features)
 
     all_client_findings = inp.content_findings + inp.client_findings + memory_findings
@@ -139,16 +137,6 @@ def with_exclusions(result: Any, exclusions: tuple[tuple[str, ...], tuple[str, .
         excluded_files=files,
         excluded_imported=result.excluded_imported and bool(dirs or files),
     )
-
-
-def _named_files(inp: AssembleInputs, exclusions: RunExclusions | None) -> frozenset[Path]:
-    """The checked files the exclusions would leave out: the ones the user named."""
-    if exclusions is None or inp.ruleset_map is None:
-        return frozenset()
-    from reporails_cli.core.discovery.walk import safe_resolve
-
-    paths = (inp.scan_root / f.path for f in getattr(inp.ruleset_map, "files", ()))
-    return frozenset(safe_resolve(p) for p in paths if exclusions.leaves_out(p))
 
 
 def _imports_left_out(inp: AssembleInputs, exclusions: RunExclusions | None) -> bool:

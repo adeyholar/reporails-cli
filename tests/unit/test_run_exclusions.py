@@ -85,8 +85,23 @@ def test_leaves_out_logical_resolved_and_symlinked_root(tmp_path: Path) -> None:
 def test_record_sorted_drops_put_back_keeps_unmatched(tmp_path: Path) -> None:
     excl = RunExclusions(root=tmp_path, dirs=frozenset({"zeta", "ext", "gone"}), files=("b/*.md", "a/*.md", "b/*.md"))
     assert excl.record() == (("ext", "gone", "zeta"), ("a/*.md", "b/*.md"))
-    put_back = [tmp_path / "ext" / "x.md", tmp_path / "a" / "y.md"]
-    assert excl.record(put_back) == (("gone", "zeta"), ("b/*.md",))
+    named = excl.with_named([tmp_path / "ext" / "x.md", tmp_path / "a" / "y.md"])
+    assert named.record() == (("ext", "gone", "zeta"), ("a/*.md", "b/*.md"))
+    assert named.record(narrowed=True) == (("gone", "zeta"), ("b/*.md",))
+
+
+@pytest.mark.unit
+@pytest.mark.subsys_map
+def test_leaves_out_exempts_named_paths_and_walks_keep_their_folders(tmp_path: Path) -> None:
+    excl = RunExclusions(root=tmp_path, dirs=frozenset({"ext", "other"}), files=("a/*.md",))
+    named = excl.with_named([tmp_path / "ext" / "x.md", tmp_path / "a" / "y.md"])
+    assert excl.leaves_out(tmp_path / "ext" / "x.md")
+    assert not named.leaves_out(tmp_path / "ext" / "x.md")
+    assert not named.leaves_out(tmp_path / "a" / "y.md")
+    assert named.leaves_out(tmp_path / "ext" / "z.md")
+    assert named.leaves_out(tmp_path / "other" / "z.md")
+    assert "ext" in excl.feature_walk_dirs and "other" in excl.feature_walk_dirs
+    assert "ext" not in named.feature_walk_dirs and "other" in named.feature_walk_dirs
 
 
 # ─── The link walk ──────────────────────────────────────────────────────

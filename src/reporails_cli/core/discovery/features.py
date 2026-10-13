@@ -118,7 +118,6 @@ def detect_features_filesystem(
     target: Path,
     agents: list[DetectedAgent] | None = None,
     exclusions: RunExclusions | None = None,
-    put_back: frozenset[Path] = frozenset(),
 ) -> DetectedFeatures:
     """Detect project features from file structure and content.
 
@@ -129,7 +128,6 @@ def detect_features_filesystem(
         target: Project root path
         agents: Pre-detected agents (avoids redundant filesystem scan)
         exclusions: The run's exclusions; a folder or file it leaves out is not counted (default: the project's config)
-        put_back: Resolved files the user named; they count even when the exclusions leave them out
 
     Returns:
         DetectedFeatures with all capability fields populated
@@ -143,7 +141,7 @@ def detect_features_filesystem(
     # gates on its own declared surfaces.
     resolved_agents = agents if agents is not None else detect_agents(target)
     agent_ids = {a.agent_type.id for a in resolved_agents}
-    scan = _SurfaceScan.for_target(target, exclusions, put_back)
+    scan = _SurfaceScan.for_target(target, exclusions)
 
     # Check for CLAUDE.md at root
     root_claude = target / "CLAUDE.md"
@@ -238,7 +236,6 @@ class _SurfaceScan:
 
     exclude_dirs: frozenset[str]
     exclusions: RunExclusions | None = None
-    put_back: frozenset[Path] = frozenset()
     roots_by_marker: dict[str, list[Path]] = field(default_factory=dict)
     hook_configs: dict[Path, HookConfig | None] = field(default_factory=dict)
 
@@ -249,17 +246,15 @@ class _SurfaceScan:
         return self.hook_configs[path]
 
     def keep(self, paths: list[Path]) -> list[Path]:
-        """`paths` without the files the run leaves out, unless the user named them."""
+        """`paths` without the files the run leaves out, (a file the user named is never left out)."""
         if self.exclusions is None:
             return paths
-        return [p for p in paths if not self.exclusions.leaves_out(p) or safe_resolve(p) in self.put_back]
+        return [p for p in paths if not self.exclusions.leaves_out(p)]
 
     @classmethod
-    def for_target(
-        cls, target: Path, exclusions: RunExclusions | None = None, put_back: frozenset[Path] = frozenset()
-    ) -> _SurfaceScan:
+    def for_target(cls, target: Path, exclusions: RunExclusions | None = None) -> _SurfaceScan:
         exclusions = exclusions or load_run_exclusions(target)
-        return cls(exclude_dirs=exclusions.walk_dirs, exclusions=exclusions, put_back=put_back)
+        return cls(exclude_dirs=exclusions.feature_walk_dirs, exclusions=exclusions)
 
 
 def _scan_for(target: Path, scan: _SurfaceScan | None) -> _SurfaceScan:

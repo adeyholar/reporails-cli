@@ -99,7 +99,8 @@ def _put_back_named(state: Any, named: set[Path]) -> None:
         scope.exclusions,
     )
     found = with_named(found, named, narrowed=True)
-    scope.filtered, scope.instruction_files, state.render.excluded = found.filtered, found.files, found.excluded
+    scope.filtered, scope.instruction_files = found.filtered, found.files
+    state.render.excluded, scope.exclusions = found.excluded, found.exclusions
 
 
 def _resolved_within_target(f: Path, target: Path) -> bool:

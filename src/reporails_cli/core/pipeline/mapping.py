@@ -64,7 +64,8 @@ def discover_scope(
 
 
 def with_named(found: ScopeDiscovery, paths: Iterable[Path], *, narrowed: bool = False) -> ScopeDiscovery:
-    """`found` with each named path that the exclusions left out added back to the run.
+    """`found` with each named path that the exclusions left out added back to the run, and every
+    named path recorded on its exclusions.
 
     With `narrowed` (the run covers only the named targets) the Excluded record drops every pattern
     a named path matches; otherwise the record keeps every pattern the user set.
@@ -72,10 +73,10 @@ def with_named(found: ScopeDiscovery, paths: Iterable[Path], *, narrowed: bool =
     from reporails_cli.core.discovery.agents import DetectedAgent, get_known_agents
     from reporails_cli.core.discovery.walk import safe_resolve
 
-    exclusions = found.exclusions
-    if exclusions is None:
+    if found.exclusions is None:
         return found
     named = sorted(set(paths))
+    exclusions = found.exclusions
     filtered = [
         DetectedAgent(
             a.agent_type, list(a.instruction_files), list(a.config_files), list(a.rule_files), a.detected_directories
@@ -94,7 +95,10 @@ def with_named(found: ScopeDiscovery, paths: Iterable[Path], *, narrowed: bool =
             getattr(holder, kind).append(path)
         files.append(path)
         held.add(safe_resolve(path))
-    return found._replace(filtered=filtered, files=files, excluded=exclusions.record(named if narrowed else ()))
+    exclusions = exclusions.with_named(named)
+    return found._replace(
+        filtered=filtered, files=files, excluded=exclusions.record(narrowed=narrowed), exclusions=exclusions
+    )
 
 
 def _held_by(detected: list[Any], path: Path) -> tuple[str, str] | None:

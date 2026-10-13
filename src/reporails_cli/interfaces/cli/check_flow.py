@@ -245,6 +245,7 @@ def _resolve_scope_at_target(state: CheckState) -> None:
     state.scope.instruction_files = found.files
     if state.targets.single_file is not None:
         state.scope.instruction_files = [safe_resolve(state.targets.single_file)]
+        state.scope.exclusions = found.exclusions and found.exclusions.with_named([state.targets.single_file])
     elif state.targets.target != state.inputs.project_root:
         state.scope.instruction_files = [
             f for f in state.scope.instruction_files if _file_under_target(f, state.targets.target)

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from reporails_cli.core.discovery.walk import safe_resolve
@@ -50,25 +51,38 @@ class RunExclusions:
 
     `dirs` and `files` are the user's folders and file globs (command line plus config).
     `walk_dirs` adds the built-in defaults and is what directory walks prune.
+    `named` holds the resolved files the user named; they are never left out.
     """
 
     root: Path
     dirs: frozenset[str] = frozenset()
     files: tuple[str, ...] = ()
     walk_dirs: frozenset[str] = DEFAULT_EXCLUDE_DIRS
+    named: frozenset[Path] = frozenset()
 
     @classmethod
     def none(cls, root: Path) -> RunExclusions:
         """No user exclusions; walks still prune the built-in defaults."""
         return cls(root=root)
 
+    def with_named(self, paths: Iterable[Path]) -> RunExclusions:
+        """A copy that also treats `paths` as named by the user."""
+        return replace(self, named=self.named | {safe_resolve(p) for p in paths})
+
+    @property
+    def feature_walk_dirs(self) -> frozenset[str]:
+        """The built-in defaults plus the user's folders that hold no named file."""
+        return DEFAULT_EXCLUDE_DIRS | {d for d in self.dirs if not any(self._dir_matches(p, d) for p in self.named)}
+
     def leaves_out(self, path: Path) -> bool:
         """True when `path` sits in a folder the user left out or matches a file glob the user left out.
 
-        Built-in defaults never count. The path is tried as given and resolved, against the root as
-        given and resolved.
+        A named path is never left out. Built-in defaults never count. The path is tried as given
+        and resolved, against the root as given and resolved.
         """
         if not self.dirs and not self.files:
+            return False
+        if self.named and safe_resolve(path) in self.named:
             return False
         roots = (self.root, safe_resolve(self.root))
         for candidate in (path, safe_resolve(path)):
@@ -83,13 +97,15 @@ class RunExclusions:
                     return True
         return False
 
-    def record(self, put_back: tuple[Path, ...] | list[Path] = ()) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    def record(self, *, narrowed: bool = False) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """The `(folders, file globs)` to report: every user pattern, sorted, without repeats.
 
-        A pattern that a put-back file matches is dropped; a pattern that matches nothing stays.
+        With `narrowed` (the run covers only the named files) a pattern that a named file matches is
+        dropped; a pattern that matches nothing stays.
         """
-        dirs = sorted(d for d in self.dirs if not any(self._dir_matches(p, d) for p in put_back))
-        files = sorted({g for g in self.files if not any(self._glob_matches(p, g) for p in put_back)})
+        named = self.named if narrowed else frozenset()
+        dirs = sorted(d for d in self.dirs if not any(self._dir_matches(p, d) for p in named))
+        files = sorted({g for g in self.files if not any(self._glob_matches(p, g) for p in named)})
         return tuple(dirs), tuple(files)
 
     def _dir_matches(self, path: Path, name: str) -> bool:
